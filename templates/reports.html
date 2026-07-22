@@ -1,0 +1,49 @@
+{% extends "app_layout.html" %}
+{% block title %}{{ report_type }} — Intel Dashboard{% endblock %}
+{% block page_title %}{{ report_type }}{% endblock %}
+{% block app_content %}
+<section class="page-heading">
+  <div><p class="section-kicker">MODUL LAPORAN</p><h1>{{ report_type }}</h1><p>Kelola dan susun {{ report_type }} dari halaman ini.</p></div>
+  <a class="primary-button" href="{{ url_for('create_lapinhar') if report_type == 'LAPINHAR' else url_for('create_lapinsus') }}">+ Buat {{ report_type }}</a>
+</section>
+{% if report_type == 'LAPINHAR' %}
+<section class="lapinhar-summary">
+  <article><span>Jumlah LAPINHAR</span><strong>{{ report_summary.total }}</strong></article>
+  <article class="pending"><span>LAPINHAR yang belum jadi LAPINSUS</span><strong>{{ report_summary.lapinsus_belum }}</strong></article>
+  <article class="pending-inteliz"><span>LAPINHAR yang belum upload Inteliz</span><strong>{{ report_summary.inteliz_belum }}</strong></article>
+</section>
+{% elif report_type == 'LAPINSUS' %}
+<section class="lapinhar-summary lapinsus-summary">
+  <article><span>Total LAPINSUS</span><strong>{{ report_summary.total }}</strong></article>
+  <article class="pending-inteliz"><span>Belum upload Inteliz</span><strong>{{ report_summary.inteliz_belum }}</strong></article>
+  <article class="pending"><span>Belum upload Sipede</span><strong>{{ report_summary.sipede_belum }}</strong></article>
+</section>
+{% endif %}
+{% if reports or search %}
+<section class="content-card table-card">
+  <div class="card-heading report-list-heading"><div><h2>Daftar {{ report_type }}</h2><span>{{ filtered_total }} laporan ditemukan</span></div>
+    {% set list_endpoint = 'lapinhar' if report_type == 'LAPINHAR' else 'lapinsus' %}
+    <form class="report-search" method="get" action="{{ url_for(list_endpoint) }}"><input type="search" name="q" value="{{ search }}" placeholder="Cari nomor, perihal, atau pembuat…"><button type="submit">Cari</button>{% if search %}<a href="{{ url_for(list_endpoint) }}">Reset</a>{% endif %}</form>
+  </div>
+  <div class="table-wrap"><table><thead><tr><th>Nomor</th><th>Perihal</th><th>Status</th><th>Dibuat Oleh</th><th>Tanggal dibuat</th><th>Aksi</th></tr></thead>
+    <tbody>{% for report in reports %}<tr>
+      <td><strong>{{ report.report_number or '-' }}</strong></td><td>{{ report.title }}</td>
+      <td>{% if report_type == 'LAPINHAR' %}<div class="report-status-list"><span><b>Inteliz</b><em class="status-value {{ report.inteliz_status }}">{{ report.inteliz_status|capitalize }}</em></span><span><b>Lapinsus</b><em class="status-value {{ report.lapinsus_status }}">{{ report.lapinsus_status|capitalize }}</em></span></div>{% else %}<div class="report-status-list"><span><b>Inteliz</b><em class="status-value {{ report.inteliz_status }}">{{ report.inteliz_status|capitalize }}</em></span><span><b>Sipede</b><em class="status-value {{ report.sipede_status }}">{{ report.sipede_status|capitalize }}</em></span></div>{% endif %}</td>
+      <td><span class="report-creator">{{ report.creator_full_name }}</span></td><td>{{ report.created_at.strftime('%d-%m-%Y') }}</td>
+      <td>{% if session.role == 'admin' or report.created_by == session.user_id %}<div class="report-actions">{% if report_type == 'LAPINHAR' %}{% if report.lapinsus_status == 'belum' %}<form id="lapinsus-convert-{{ report.id }}" method="post" action="{{ url_for('convert_lapinhar_to_lapinsus', report_id=report.id) }}"><button type="button" class="convert-lapinsus" data-lapinsus-convert data-form-id="lapinsus-convert-{{ report.id }}" data-number="{{ report.report_number|e }}" data-subject="{{ report.title|e }}">Lapinsuskan</button></form>{% endif %}{% if report.inteliz_status == 'belum' %}<form method="post" action="{{ url_for('sync_lapinhar_inteliz', report_id=report.id) }}" onsubmit="return confirm('Sinkronkan LAPINHAR {{ report.report_number|e }} ke Inteliz sekarang?')"><button type="submit" class="sync-inteliz">Sinkron Inteliz</button></form>{% else %}<span class="sync-complete">Tersinkron</span>{% endif %}<button type="button" class="send-whatsapp" data-whatsapp-send data-url="{{ url_for('send_lapinhar_whatsapp', report_id=report.id) }}" data-attachment-count="{{ report.attachment_count }}">Kirim WA</button><a href="{{ url_for('edit_lapinhar', report_id=report.id) }}">Edit</a><form method="post" action="{{ url_for('delete_lapinhar', report_id=report.id) }}" onsubmit="return confirm('Hapus LAPINHAR {{ report.report_number|e }}? Data dan lampiran tidak dapat dikembalikan.')"><button type="submit">Hapus</button></form>{% else %}<a href="{{ url_for('edit_lapinsus', report_id=report.id) }}">Edit</a><form method="post" action="{{ url_for('delete_lapinsus', report_id=report.id) }}" onsubmit="return confirm('Hapus LAPINSUS {{ report.report_number|e }}?')"><button type="submit">Hapus</button></form>{% endif %}</div>{% else %}<span class="report-readonly">Hanya lihat</span>{% endif %}</td>
+    </tr>{% else %}<tr><td colspan="6" class="no-search-results">Tidak ada {{ report_type }} yang sesuai dengan pencarian “{{ search }}”.</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% if total_pages > 1 %}
+  <nav class="report-pagination" aria-label="Halaman daftar {{ report_type }}"><span>Halaman {{ page }} dari {{ total_pages }}</span><div>
+    {% if page > 1 %}<a href="{{ url_for(list_endpoint, q=search, page=page-1) }}">← Sebelumnya</a>{% endif %}
+    {% for number in range(1, total_pages + 1) %}{% if number == page %}<strong>{{ number }}</strong>{% elif number == 1 or number == total_pages or (number >= page-2 and number <= page+2) %}<a href="{{ url_for(list_endpoint, q=search, page=number) }}">{{ number }}</a>{% elif number == 2 or number == total_pages-1 %}<i>…</i>{% endif %}{% endfor %}
+    {% if page < total_pages %}<a href="{{ url_for(list_endpoint, q=search, page=page+1) }}">Berikutnya →</a>{% endif %}
+  </div></nav>
+  {% endif %}
+</section>
+{% else %}
+<section class="empty-state"><div class="empty-icon">▤</div><h2>Belum ada laporan</h2><p>Mulai dengan membuat laporan {{ report_type }} pertama Anda.</p></section>
+{% endif %}
+{% if report_type == 'LAPINHAR' %}{% include '_inteliz_auth_modal.html' %}{% include '_whatsapp_send_modal.html' %}{% include '_lapinsus_convert_modal.html' %}{% endif %}
+{% endblock %}
+{% block extra_scripts %}{% if report_type == 'LAPINHAR' %}<script src="{{ url_for('static', filename='js/inteliz-auth.js') }}"></script><script src="{{ url_for('static', filename='js/whatsapp-send.js') }}"></script><script src="{{ url_for('static', filename='js/lapinsus-convert.js') }}"></script>{% endif %}{% endblock %}

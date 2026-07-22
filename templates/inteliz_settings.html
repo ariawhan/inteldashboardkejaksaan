@@ -1,0 +1,25 @@
+{% extends "app_layout.html" %}
+{% block title %}Konfigurasi Inteliz — Intel Dashboard{% endblock %}
+{% block page_title %}Konfigurasi Inteliz{% endblock %}
+{% block app_content %}
+<section class="page-heading">
+  <div><p class="section-kicker">KONFIGURASI AKUN</p><h1>Akun Inteliz</h1><p>Kredensial ini khusus untuk akun Anda dan akan digunakan saat automasi upload.</p></div>
+</section>
+<section class="content-card inteliz-settings-card">
+  <div class="card-heading"><div><h2>Login Inteliz</h2><p>Password disimpan dalam bentuk terenkripsi dan tidak pernah ditampilkan kembali.</p></div>{% if setting %}<span class="inteliz-configured">Terkonfigurasi</span>{% endif %}</div>
+  <form method="post" class="admin-form" autocomplete="off">
+    <label>Username Inteliz<input name="inteliz_username" value="{{ setting.inteliz_username if setting else '' }}" required autocomplete="off" placeholder="Masukkan username Inteliz"></label>
+    <label>Password Inteliz<input name="inteliz_password" type="password" autocomplete="new-password" placeholder="{{ 'Kosongkan jika tidak ingin mengganti password' if setting else 'Masukkan password Inteliz' }}" {{ '' if setting else 'required' }}></label>
+    {% if setting %}<p class="credential-hint">Konfigurasi terakhir diperbarui {{ setting.updated_at.strftime('%d-%m-%Y %H:%M') }}. Isi password hanya jika ingin menggantinya.</p>{% endif %}
+    <button class="primary-button" type="submit">Simpan Konfigurasi</button>
+  </form>
+</section>
+{% if setting %}
+<section class="content-card inteliz-connect-card">
+  <div><h2>Koneksi Inteliz</h2><p>Browser berjalan di server. CAPTCHA dan kode autentikator dimasukkan melalui popup ini.</p>{% if setting.connected_at %}<small>Terhubung terakhir: {{ setting.connected_at.strftime('%d-%m-%Y %H:%M') }}</small>{% endif %}</div>
+  <button type="button" class="primary-button" data-inteliz-connect>{{ 'Hubungkan Ulang Inteliz' if setting.connected_at else 'Hubungkan Inteliz' }}</button>
+</section>
+{% endif %}
+{% include '_inteliz_auth_modal.html' %}
+{% endblock %}
+{% block extra_scripts %}<script src="{{ url_for('static', filename='js/inteliz-auth.js') }}"></script>{% endblock %}

@@ -1,0 +1,1 @@
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS issue_code VARCHAR(20) NULL AFTER category_id;

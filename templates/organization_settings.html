@@ -1,0 +1,17 @@
+{% extends "app_layout.html" %}
+{% block title %}Konfigurasi Instansi — Intel Dashboard{% endblock %}
+{% block page_title %}Konfigurasi Instansi{% endblock %}
+{% block app_content %}
+<section class="page-heading"><div><p class="section-kicker">KONFIGURASI</p><h1>Data Instansi</h1><p>Data ini digunakan otomatis pada pratinjau dan dokumen laporan.</p></div></section>
+<section class="content-card organization-config-card">
+  <div class="config-card-head"><span>01</span><div><h2>Identitas Instansi</h2><small>Konfigurasi utama aplikasi</small></div></div>
+  <form method="post" class="admin-form">
+    <label>Nama instansi<input name="organization_name" value="{{ organization.organization_name }}" required></label>
+    <label>Kode instansi<input name="institution_code" value="{{ organization.institution_code }}" required placeholder="N.1.11"></label>
+    <label>Alamat<textarea name="address" rows="4" required>{{ organization.address }}</textarea></label>
+    <label>Nomor telepon<input name="phone" value="{{ organization.phone }}" required></label>
+    <label>Website<input name="website" value="{{ organization.website }}" placeholder="https://www.kejaksaan.go.id" required></label>
+    <button class="primary-button" type="submit">Simpan perubahan</button>
+  </form>
+</section>
+{% endblock %}

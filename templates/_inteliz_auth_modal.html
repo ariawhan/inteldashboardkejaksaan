@@ -1,0 +1,11 @@
+<div class="inteliz-auth-modal" data-inteliz-modal data-auto-connect="{{ 'true' if auto_connect|default(false) else 'false' }}" data-next-url="{{ next_url|default('') }}" hidden>
+  <div class="inteliz-auth-dialog" role="dialog" aria-modal="true" aria-labelledby="inteliz-auth-title">
+    <button type="button" class="inteliz-modal-close" data-inteliz-close aria-label="Tutup">×</button>
+    <p class="section-kicker">LOGIN OTOMATIS</p><h2 id="inteliz-auth-title">Hubungkan Inteliz</h2>
+    <p data-inteliz-message>Menyiapkan browser di komputer server…</p>
+    <div class="inteliz-auth-loading" data-inteliz-loading><i></i><span>Mohon tunggu</span></div>
+    <form data-inteliz-captcha-form hidden><img data-inteliz-captcha-image alt="Gambar CAPTCHA Inteliz"><label>Kode CAPTCHA<input name="captcha" required autocomplete="off" maxlength="20" placeholder="Ketik kode pada gambar"></label><button class="primary-button">Kirim CAPTCHA</button></form>
+    <form data-inteliz-otp-form hidden><label>Kode autentikator<input name="otp" required inputmode="numeric" autocomplete="one-time-code" maxlength="20" placeholder="Masukkan kode autentikator"></label><button class="primary-button">Verifikasi</button></form>
+    <div class="inteliz-auth-success" data-inteliz-success hidden><strong>✓ Inteliz terhubung</strong><p>Cookie dan token telah disimpan terenkripsi.</p></div>
+  </div>
+</div>

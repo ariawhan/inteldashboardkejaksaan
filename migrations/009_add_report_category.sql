@@ -1,0 +1,1 @@
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS category_id TINYINT UNSIGNED NULL AFTER classification;

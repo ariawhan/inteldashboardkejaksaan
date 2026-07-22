@@ -1,0 +1,121 @@
+{% extends "app_layout.html" %}
+{% set doc_label = document_label|default('LAPINHAR') %}{% set doc_kind = document_kind|default('lapinhar') %}{% set doc_heading = report_heading|default('LAPORAN INFORMASI HARIAN') %}{% set doc_code = report_code|default('L. IN.1') %}
+{% block title %}{{ 'Edit' if report else 'Buat' }} {{ doc_label }} — Intel Dashboard{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{{ url_for('static', filename='vendor/jodit/jodit.min.css') }}"><style>.sipede-upload-notice{display:flex;align-items:flex-start;gap:11px;margin:-2px 0 18px;padding:13px 14px;border:1px solid #bfdbfe;border-radius:9px;background:#eff6ff;color:#1e3a8a}.sipede-upload-notice>span{width:24px;height:24px;flex:0 0 auto;display:grid;place-items:center;border-radius:50%;background:#2563eb;color:#fff;font-weight:900}.sipede-upload-notice strong{display:block;font-size:11px}.sipede-upload-notice p{margin:3px 0 0;font-size:9px;line-height:1.5}.sipede-upload-button{border:0!important;background:#2563eb!important;color:#fff!important}.sipede-upload-button:hover{background:#1d4ed8!important}.sipede-upload-button:disabled{opacity:.55;cursor:not-allowed!important}</style>{% endblock %}
+{% block page_title %}{{ 'Edit' if report else 'Buat' }} {{ doc_label }}{% endblock %}
+{% block app_content %}
+<form method="post" id="lapinhar-form" class="report-editor" enctype="multipart/form-data" data-report-id="{{ report.id if report else '' }}" data-document-kind="{{ doc_kind }}" data-document-prefix="{{ 'R.LIK' if doc_kind == 'lapinsus' else 'R.LIH' }}" data-report-heading="{{ doc_heading }}" data-check-number-url="{{ check_number_url|default(url_for('check_lapinhar_number')) }}" data-reload-number-url="{{ reload_number_url|default(url_for('reload_lapinhar_number')) }}">
+  <input type="hidden" name="document_kind" value="{{ doc_kind }}">
+  <input type="hidden" name="after_save" value="">
+  <section class="editor-form">
+    <div class="editor-card">
+      <div class="form-section-title"><span>01</span><div><strong>Nota Dinas</strong><small>Identitas dan pengantar laporan</small></div></div>
+      {% if doc_kind == 'lapinsus' and (not report or report.sipede_status != 'sudah') %}<div class="sipede-upload-notice" data-sipede-upload-notice><span>!</span><div><strong>Belum diupload ke Sipede</strong><p>Simpan dan periksa LAPINSUS, kemudian gunakan tombol Upload ke Sipede.</p></div></div>{% endif %}
+      <div class="form-grid">
+        <label class="full category-field">Kategori Laporan<span class="category-combobox" data-category-combobox><input type="text" data-category-search placeholder="---Pilih atau ketik sektor laporan---" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"><button type="button" data-category-toggle aria-label="Buka daftar kategori">⌄</button><span class="category-dropdown" data-category-dropdown role="listbox"></span></span><select name="category_id" data-category-select data-current-value="{{ report.category_id if report else '' }}" tabindex="-1" aria-hidden="true"><option value="">---Pilih Sektor Laporan---</option>{% include '_report_category_options.html' %}</select></label>
+        <input type="hidden" name="number_reservation_token" value="{{ number_reservation.reservation_token }}">
+        <input type="hidden" data-letter-sequence value="{{ number_reservation.sequence_number }}">
+        <input type="hidden" data-letter-year value="{{ number_reservation.document_year|default((report.report_date.year if report and report.report_date else today[:4])) }}">
+        <input type="hidden" data-institution-code value="{{ organization.institution_code }}">
+        <label class="{{ 'full' if doc_kind != 'lapinsus' else '' }}">Nomor Surat <span class="letter-number-row"><input name="report_number" data-preview="number" value="{{ report.report_number if report else '' }}" readonly required><button type="button" data-reload-letter-number hidden>Reload Nomor</button></span><small data-number-status></small></label>
+        {% if doc_kind == 'lapinsus' %}<label>Nomor Sipede<input name="sipede_number" value="{{ report.sipede_number if report and report.sipede_number else '-' }}" readonly></label>{% endif %}
+        <label class="full issue-field">Nomor Permasalahan<span class="issue-combobox" data-issue-combobox><input type="text" data-issue-search placeholder="---Pilih atau ketik nomor permasalahan---" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"><button type="button" data-issue-toggle aria-label="Buka daftar nomor permasalahan">⌄</button><span class="issue-dropdown" data-issue-dropdown role="listbox"></span></span><select name="issue_code" data-issue-code data-current-value="{{ report.issue_code if report else '' }}" tabindex="-1" aria-hidden="true"><option value="">---Pilih Nomor Permasalahan---</option>{% include '_issue_code_options.html' %}</select></label>
+        <label>Tanggal <input name="report_date" data-preview="date" type="date" value="{{ report.report_date.isoformat() if report and report.report_date else today }}" required></label>
+        <label>Lampiran <input data-automatic-attachment value="-" readonly title="Terisi otomatis sesuai jumlah lampiran yang memiliki foto"></label>
+        <label class="full">Perihal <textarea name="subject" data-preview="subject" rows="3" required placeholder="Pokok permasalahan laporan">{{ report.title if report else '' }}</textarea></label>
+      </div>
+    </div>
+    <div class="editor-card">
+      <div class="form-section-title"><span>02</span><div><strong>Isi {{ doc_label }}</strong><small>Setiap baris baru menjadi paragraf</small></div></div>
+      <script type="application/json" data-existing-sources>{{ existing_sources|tojson }}</script>
+      <div class="rich-fields">
+        <div class="rich-field"><div class="rich-label"><label>I. Informasi yang diperoleh</label></div><input type="hidden" name="information" data-rich-input="information" value="{{ report.facts|e if report else '' }}"><div class="rich-editor large" data-rich-editor="information" data-placeholder="Tuliskan informasi yang diperoleh..."></div></div>
+        <div class="rich-field source-field"><div class="rich-label"><label>II. Sumber informasi</label></div><input type="hidden" name="sources" data-rich-input="sources" data-source-hidden><div class="fixed-source"><span>SUMBER UTAMA</span><strong>Intelijen Kejaksaan Negeri Buleleng</strong><small>Sumber tetap · tidak dapat dihapus</small></div><div class="additional-sources" data-additional-sources></div><button type="button" class="add-source-button" data-add-source>+ Tambah sumber informasi</button><p class="source-hint">Penomoran otomatis muncul jika terdapat sumber tambahan.</p></div>
+        <div class="rich-field"><div class="rich-label"><label>III. Tren perkembangan / perkiraan</label></div><input type="hidden" name="trends" data-rich-input="trends" value="{{ report.analysis|e if report else '' }}"><div class="rich-editor large" data-rich-editor="trends" data-placeholder="Tuliskan tren perkembangan dan perkiraan..."></div></div>
+        <div class="rich-field"><div class="rich-label"><label>IV. Pendapat / saran</label></div><input type="hidden" name="suggestions" data-rich-input="suggestions" value="{{ report.recommendation|e if report else '' }}"><div class="rich-editor large" data-rich-editor="suggestions" data-placeholder="Tuliskan pendapat dan saran..."></div></div>
+      </div>
+    </div>
+    <div class="editor-card">
+      <div class="form-section-title"><span>03</span><div><strong>Penandatangan</strong><small>Pembuat laporan dan pejabat autentikasi</small></div></div>
+      <div class="signer-choices">
+        <p>PILIH PEMBUAT LAPORAN</p>
+        <label class="signer-option"><input type="radio" name="subsection_signer" value="kasi_intel" {{ 'checked' if selected_signer|default('kasubsi_1') == 'kasi_intel' else '' }} data-signer-no-auth="true" data-signer-position="{{ signatories.get('kasi_intel', {}).get('position_name', 'Kepala Seksi Intelijen') }}" data-signer-name="{{ signatories.get('kasi_intel', {}).get('full_name', '') }}" data-signer-rank="{{ signatories.get('kasi_intel', {}).get('rank_nip', '') }}"><span class="choice-check"></span><span><strong>Kasi Intelijen</strong><small>Sebagai pembuat laporan</small><em>Tanpa blok autentikasi</em></span></label>
+        <label class="signer-option"><input type="radio" name="subsection_signer" value="kasubsi_1" {{ 'checked' if selected_signer|default('kasubsi_1') == 'kasubsi_1' else '' }} data-signer-position="{{ signatories.get('kasubsi_1', {}).get('position_name', 'Kepala Subseksi I Intelijen') }}" data-signer-name="{{ signatories.get('kasubsi_1', {}).get('full_name', '') }}" data-signer-rank="{{ signatories.get('kasubsi_1', {}).get('rank_nip', '') }}"><span class="choice-check"></span><span><strong>Kasubsi I</strong><small>{{ signatories.get('kasubsi_1', {}).get('position_name', 'Kepala Subseksi I Intelijen') }}</small><em>{{ signatories.get('kasubsi_1', {}).get('full_name') or 'Belum dikonfigurasi' }}</em></span></label>
+        <label class="signer-option"><input type="radio" name="subsection_signer" value="kasubsi_2" {{ 'checked' if selected_signer|default('kasubsi_1') == 'kasubsi_2' else '' }} data-signer-position="{{ signatories.get('kasubsi_2', {}).get('position_name', 'Kepala Subseksi II Intelijen') }}" data-signer-name="{{ signatories.get('kasubsi_2', {}).get('full_name', '') }}" data-signer-rank="{{ signatories.get('kasubsi_2', {}).get('rank_nip', '') }}"><span class="choice-check"></span><span><strong>Kasubsi II</strong><small>{{ signatories.get('kasubsi_2', {}).get('position_name', 'Kepala Subseksi II Intelijen') }}</small><em>{{ signatories.get('kasubsi_2', {}).get('full_name') or 'Belum dikonfigurasi' }}</em></span></label>
+      </div>
+    </div>
+    <div class="editor-card">
+      <div class="form-section-title"><span>04</span><div><strong>Lampiran Foto</strong><small>Maksimal dua foto pada setiap lampiran</small></div></div>
+      <script type="application/json" data-existing-attachments>{{ existing_attachment_groups|default([])|tojson }}</script>
+      <div class="attachment-input-list" data-attachment-input-list></div>
+      {% if existing_attachments %}<p class="existing-attachment-note">{{ existing_attachments|length }} foto tersimpan. Lampiran lama dipertahankan jika tidak mengunggah foto baru.</p>{% endif %}
+      <button type="button" class="add-attachment-button" data-add-attachment>+ Tambah lampiran</button>
+    </div>
+    <div class="editor-actions"><button type="submit" class="outline-action" data-save-report>{{ 'Simpan Perubahan' if report else 'Simpan' }}</button><button type="button" class="outline-action print-button" data-save-before-action="print" data-print-preview>Cetak Preview</button><button type="button" class="export-button pdf" data-save-before-action="pdf" data-export-preview-pdf>Ekspor PDF</button>{% if doc_kind == 'lapinsus' %}<button type="button" class="sipede-upload-button" data-save-before-action="sipede" data-sipede-upload data-url="{{ url_for('upload_lapinsus_sipede', report_id=report.id) if report else '' }}" {{ 'disabled' if report and report.sipede_status == 'sudah' else '' }}>{{ 'Sudah di Sipede' if report and report.sipede_status == 'sudah' else 'Upload ke Sipede' }}</button>{% endif %}</div>
+  </section>
+  <aside class="preview-column">
+    <div class="preview-toolbar"><span><i></i> Pratinjau Langsung</span><small>Folio · 2 halaman</small></div>
+    <nav class="preview-tabs" aria-label="Bagian pratinjau">
+      <button type="button" class="active" data-preview-tab="cover"><span>01</span>Cover</button>
+      <button type="button" data-preview-tab="pengantar"><span>02</span>Pengantar</button>
+      <button type="button" data-preview-tab="laporan"><span>03</span>Laporan</button>
+      <button type="button" data-preview-tab="lampiran"><span>04</span>Lampiran</button>
+    </nav>
+    <div class="preview-pages">
+      <article class="paper-preview folio-page cover-preview active" data-preview-page="cover">
+        <b class="cover-agency" data-output="organization">{{ organization.organization_name }}</b>
+        <img class="cover-logo" src="{{ url_for('static', filename='img/logo-kejaksaan.jpeg') }}" alt="Logo Kejaksaan Republik Indonesia">
+        <div class="cover-copy"><h2>{{ doc_label }}</h2><h3 data-output="subject">PERIHAL LAPORAN</h3></div>
+        <div class="cover-secret-stamp" aria-label="Klasifikasi Rahasia"><div class="secret-lines"></div><div class="secret-label">RAHASIA</div></div>
+        <b class="cover-place-date"><span data-output="city">Singaraja</span>, <span data-output="date">—</span></b>
+      </article>
+      {% if doc_kind == 'lapinsus' %}
+      <article class="paper-preview folio-page lapinsus-letter-preview" data-preview-page="pengantar">
+        <div class="classification-header">RAHASIA</div>
+        <header class="lapinsus-letterhead">
+          <img src="{{ url_for('static', filename='img/logo-kejaksaan.jpeg') }}" alt="Logo Kejaksaan">
+          <div><p>KEJAKSAAN REPUBLIK INDONESIA</p><p>KEJAKSAAN TINGGI BALI</p><strong data-output="organization">{{ organization.organization_name }}</strong><small>{{ organization.address or 'Jalan Dewi Sartika, Singaraja' }}</small><small>{{ organization.phone or '' }}{% if organization.website %} · {{ organization.website }}{% endif %}</small></div>
+        </header>
+        <p class="lapinsus-letter-date">Buleleng, <span data-output="date">—</span></p>
+        <div class="lapinsus-letter-recipient"><p>Yth.</p><p>Kepala Kejaksaan Tinggi Bali</p><br><p>Di-</p><p>Denpasar</p></div>
+        <section class="lapinsus-letter-title"><h2>SURAT PENGANTAR</h2><p>Nomor: <strong>R-…/N.1.11/<span data-output="issue-code">—</span>/<span data-output="month-year">—</span></strong></p></section>
+        <table class="lapinsus-letter-table"><thead><tr><th>No</th><th>Jenis Barang Atau Naskah Dinas Yang Dikirimkan</th><th>Jumlah</th><th>Keterangan</th></tr></thead><tbody><tr><td>1.</td><td><strong>LAPORAN INFORMASI KHUSUS NOMOR :</strong><br><span data-output="number">—</span><br>Tanggal <span data-output="date">—</span><br><br><strong>PERIHAL :</strong> <span data-output="subject">—</span></td><td><span data-output="attachment-count">1 (satu) Eks.</span></td><td>Dengan hormat disampaikan untuk maklum.</td></tr></tbody></table>
+        <div class="lapinsus-letter-signature"><p>{{ signatories.get('kajari', {}).get('position_name', 'Kepala Kejaksaan Negeri Buleleng') }}</p><span>{% if signatories.get('kajari', {}).get('use_tte') %}<img src="{{ url_for('static', filename='img/tte_kajari.png') }}" alt="Tanda tangan elektronik Kepala Kejaksaan Negeri Buleleng">{% endif %}</span><strong><u>{{ signatories.get('kajari', {}).get('full_name') or 'Belum dikonfigurasi' }}</u></strong><p>{{ signatories.get('kajari', {}).get('rank_nip') or 'Pangkat dan NIP belum dikonfigurasi' }}</p></div>
+        <div class="lapinsus-letter-copy"><p>Tembusan:</p><ol><li>Yth. Wakil Kepala Kejaksaan Tinggi Bali;</li><li>Yth. Asisten Bidang Intelijen Kejaksaan Tinggi Bali;</li><li>Yth. Asisten Bidang Pengawasan Kejaksaan Tinggi Bali;</li><li>Arsip.</li></ol></div>
+        <footer class="classification-footer">RAHASIA</footer>
+      </article>
+      {% else %}
+      <article class="paper-preview folio-page memo-preview" data-preview-page="pengantar">
+        <header class="memo-office"><span data-output="organization">{{ organization.organization_name }}</span><i></i></header>
+        <h2 class="memo-title">NOTA&nbsp; - &nbsp;DINAS</h2>
+        <div class="memo-meta"><div><b>K E P A D A</b><span>:</span><p data-output="recipient">{{ fixed_recipient }}</p></div><div><b>D A R I</b><span>:</span><p data-output="sender">{{ fixed_sender }}</p></div><div><b>NOMOR</b><span>:</span><p data-output="number">—</p></div><div><b>TANGGAL</b><span>:</span><p data-output="date">—</p></div><div><b>SIFAT</b><span>:</span><p data-output="classification">RAHASIA</p></div><div><b>LAMPIRAN</b><span>:</span><p data-output="attachment">-</p></div><div><b>PERIHAL</b><span>:</span><p data-output="subject">—</p></div></div>
+        <div class="memo-signature"><p data-output="auth_position">{{ signatories.get('kasi_intel', {}).get('position_name', 'Kepala Seksi Intelijen') }}</p><p class="signature-office" data-output="organization">{{ organization.organization_name }}</p><span class="signature-space"></span><b><u data-output="auth_name">{{ signatories.get('kasi_intel', {}).get('full_name') or 'Belum dikonfigurasi' }}</u></b><p data-output="auth_rank">{{ signatories.get('kasi_intel', {}).get('rank_nip', '') }}</p></div>
+      </article>
+      {% endif %}
+      <div class="report-preview-group" data-preview-page="laporan" data-report-preview-group>
+      <article class="paper-preview folio-page report-preview" data-report-page>
+        <div class="classification-header">RAHASIA</div>
+        <div class="report-code"><b data-output="organization">{{ organization.organization_name }}</b><span><b>{{ doc_code }}</b><br>Copy ke 1<br>Dari 1 copies</span></div>
+        <header class="document-header"><h2>{{ doc_heading }}</h2><p>NOMOR : <span data-output="number">—</span></p>{% if doc_kind == 'lapinsus' %}<p class="lapinsus-preview-subject"><strong>PERIHAL</strong> : <span data-output="subject">—</span></p>{% endif %}</header>
+        <div class="document-body official-body"><section><h3>I. INFORMASI YANG DIPEROLEH</h3><div data-output-list="information"><p>Isi informasi akan tampil di sini.</p></div></section><section><h3>II. SUMBER INFORMASI</h3><div data-output-list="sources"><p>Sumber informasi akan tampil di sini.</p></div></section><section><h3>III. TREN PERKEMBANGAN / PERKIRAAN</h3><div data-output-list="trends"><p>Tren perkembangan akan tampil di sini.</p></div></section><section><h3>IV. PENDAPAT / SARAN</h3><div data-output-list="suggestions"><p>Pendapat dan saran akan tampil di sini.</p></div></section></div>
+        <div class="signature-grid"><div class="auth-signature"><b>AUTENTIKASI:</b><p data-output="auth_position">{{ signatories.get('kasi_intel', {}).get('position_name', 'Kepala Seksi Intelijen') }}</p><p data-output="organization">{{ organization.organization_name }}</p><span class="report-signature-space"></span><b><u data-output="auth_name">{{ signatories.get('kasi_intel', {}).get('full_name') or 'Belum dikonfigurasi' }}</u></b><p data-output="auth_rank">{{ signatories.get('kasi_intel', {}).get('rank_nip', '') }}</p></div><div class="creator-signature"><p><span data-output="city">Singaraja</span>, <span data-output="date">—</span></p><p>Yang Membuat Laporan</p><p data-output="creator_position">{{ signatories.get('kasubsi_1', {}).get('position_name', 'Kepala Subseksi I Intelijen') }}</p><span class="report-signature-space"></span><b><u data-output="creator_name">{{ signatories.get('kasubsi_1', {}).get('full_name') or 'Belum dikonfigurasi' }}</u></b><p data-output="creator_rank">{{ signatories.get('kasubsi_1', {}).get('rank_nip', '') }}</p></div></div>
+        <footer class="classification-footer">RAHASIA</footer>
+      </article>
+      </div>
+      <div class="attachment-preview-group" data-preview-page="lampiran" data-attachment-preview-group></div>
+    </div>
+  </aside>
+</form>
+<div class="save-action-modal" data-save-action-modal hidden>
+  <div class="save-action-backdrop" data-save-action-cancel></div>
+  <section class="save-action-dialog" role="dialog" aria-modal="true" aria-labelledby="save-action-title">
+    <button type="button" class="save-action-close" data-save-action-cancel aria-label="Tutup">×</button>
+    <div class="save-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 3h12l2 2v16H5V3Z"/><path d="M8 3v6h8V3M8 21v-7h8v7"/></svg></div>
+    <p class="section-kicker">SIMPAN PERUBAHAN</p>
+    <h2 id="save-action-title">Simpan sebelum melanjutkan?</h2>
+    <p>Perubahan {{ doc_label }} akan disimpan terlebih dahulu. Setelah berhasil, sistem akan melanjutkan ke <strong data-save-action-label>aksi yang dipilih</strong>.</p>
+    <div class="save-action-buttons"><button type="button" class="save-action-cancel" data-save-action-cancel>Batal</button><button type="button" class="save-action-confirm" data-save-action-confirm>Simpan &amp; Lanjutkan</button></div>
+  </section>
+</div>
+{% endblock %}
+{% block extra_scripts %}<script src="{{ url_for('static', filename='vendor/jodit/jodit.min.js') }}"></script><script src="{{ url_for('static', filename='js/lapinhar-editor.js') }}"></script>{% endblock %}

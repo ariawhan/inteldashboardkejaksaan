@@ -1,0 +1,4 @@
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS information_spacing DECIMAL(3,2) NOT NULL DEFAULT 1.15 AFTER auth_rank_nip;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS sources_spacing DECIMAL(3,2) NOT NULL DEFAULT 1.15 AFTER information_spacing;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS trends_spacing DECIMAL(3,2) NOT NULL DEFAULT 1.15 AFTER sources_spacing;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS suggestions_spacing DECIMAL(3,2) NOT NULL DEFAULT 1.15 AFTER trends_spacing;

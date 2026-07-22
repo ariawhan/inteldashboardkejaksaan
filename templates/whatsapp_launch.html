@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Menyiapkan WhatsApp — Intel Dashboard{% endblock %}
+{% block content %}
+<main class="whatsapp-launch-page">
+  <section class="whatsapp-launch-card">
+    <div class="whatsapp-launch-icon"><img src="{{ url_for('static', filename='img/whatsapp-logo.svg') }}" alt="WhatsApp"></div>
+    <h1>Menyiapkan WhatsApp</h1>
+    {% if attachment_count %}
+    {% if uses_archive %}
+    <p>Mengunduh satu berkas ZIP berisi seluruh {{ attachment_count }} foto lampiran. Buka ZIP, pilih semua foto, lalu seret ke ruang chat WhatsApp.</p>
+    {% else %}
+    <p>Mengunduh {{ attachment_count }} foto lampiran. Setelah WhatsApp Web terbuka, seret foto dari folder Downloads ke ruang chat.</p>
+    {% endif %}
+    <div class="whatsapp-launch-progress"><span></span></div>
+    <small>Semua foto dari seluruh lampiran disertakan dan diurutkan berdasarkan nomor lampiran.</small>
+    {% else %}
+    <p>Laporan ini tidak mempunyai foto lampiran. WhatsApp Web akan segera dibuka.</p>
+    {% endif %}
+    <a class="primary-button" href="{{ whatsapp_url }}">Buka WhatsApp Sekarang</a>
+  </section>
+</main>
+{% if downloads %}
+<div hidden id="attachment-downloads">
+  {% for download in downloads %}<a href="{{ download }}" download></a>{% endfor %}
+</div>
+{% endif %}
+<script>
+(() => {
+  const links = [...document.querySelectorAll('#attachment-downloads a')];
+  links.forEach((link, index) => window.setTimeout(() => link.click(), index * 450));
+  const delay = Math.max(900, links.length * 450 + 700);
+  window.setTimeout(() => window.location.assign({{ whatsapp_url|tojson }}), delay);
+})();
+</script>
+{% endblock %}

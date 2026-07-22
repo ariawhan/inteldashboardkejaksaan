@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Masuk — Intel Dashboard{% endblock %}
+{% block content %}
+<main class="login-shell">
+  <section class="brand-panel" aria-label="Tentang aplikasi">
+    <div class="brand-content">
+      <a class="brand" href="/" aria-label="Intel Dashboard">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 48 48"><path d="M24 4 41 14v20L24 44 7 34V14L24 4Z"/><path d="m16 25 5 5 11-13"/></svg>
+        </span>
+        <span>INTEL<span class="brand-accent">DASH</span></span>
+      </a>
+
+      <div class="hero-copy">
+        <span class="eyebrow"><i></i> Sistem Penyusunan Laporan</span>
+        <h1>Informasi akurat.<br><em>Keputusan lebih cepat.</em></h1>
+        <p>Ruang kerja terpadu untuk menyusun, mengelola, dan memantau laporan informasi harian dan khusus.</p>
+      </div>
+
+      <div class="report-types">
+        <div class="report-item"><span>01</span><div><strong>LAPINHAR</strong><small>Laporan Informasi Harian</small></div></div>
+        <div class="report-item"><span>02</span><div><strong>LAPINSUS</strong><small>Laporan Informasi Khusus</small></div></div>
+      </div>
+    </div>
+    <div class="grid-decoration"></div>
+    <div class="orb orb-one"></div><div class="orb orb-two"></div>
+  </section>
+
+  <section class="form-panel">
+    <div class="login-card">
+      <div class="mobile-brand">
+        <span class="brand-mark"><svg viewBox="0 0 48 48"><path d="M24 4 41 14v20L24 44 7 34V14L24 4Z"/><path d="m16 25 5 5 11-13"/></svg></span>
+        <span>INTEL<span class="brand-accent">DASH</span></span>
+      </div>
+      <div class="form-heading">
+        <span class="status-pill"><i></i> Sistem Aktif</span>
+        <h2>Selamat datang</h2>
+        <p>Masukkan kredensial Anda untuk melanjutkan.</p>
+      </div>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+          <div class="alert {{ category }}" role="alert">{{ message }}</div>
+        {% endfor %}
+      {% endwith %}
+
+      <form method="post" class="login-form">
+        <label for="username">Username</label>
+        <div class="input-wrap">
+          <svg viewBox="0 0 24 24"><path d="M20 21a8 8 0 0 0-16 0M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z"/></svg>
+          <input id="username" name="username" type="text" placeholder="Masukkan username" autocomplete="username" required autofocus>
+        </div>
+
+        <div class="label-row"><label for="password">Kata sandi</label><button type="button" class="forgot-password-link" data-forgot-password-open>Lupa kata sandi?</button></div>
+        <div class="input-wrap">
+          <svg viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+          <input id="password" name="password" type="password" placeholder="Masukkan kata sandi" autocomplete="current-password" required>
+          <button class="password-toggle" type="button" aria-label="Tampilkan kata sandi" data-password-toggle>
+            <svg viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+
+        <label class="remember"><input type="checkbox" name="remember"><span></span> Ingat saya di perangkat ini</label>
+        <button class="submit-button" type="submit"><span>Masuk ke Dashboard</span><span aria-hidden="true">→</span></button>
+      </form>
+      <p class="security-note"><span>◆</span> Akses terbatas untuk personel berwenang</p>
+    </div>
+    <footer>© 2026 Intel Dashboard · Versi 1.0.0</footer>
+  </section>
+</main>
+<div class="forgot-password-modal" data-forgot-password-modal hidden><div class="forgot-password-backdrop" data-forgot-password-close></div><section class="forgot-password-dialog" role="dialog" aria-modal="true" aria-labelledby="forgot-password-title"><button type="button" class="forgot-password-close" data-forgot-password-close>×</button><div class="forgot-password-icon"><svg viewBox="0 0 24 24"><path d="M12 17v.01M8.5 9a3.5 3.5 0 1 1 5.2 3.05c-1.05.6-1.7 1.16-1.7 2.45"/></svg></div><p class="section-kicker">BANTUAN AKUN</p><h2 id="forgot-password-title">Lupa kata sandi?</h2><p>Silakan hubungi administrator untuk mendapatkan password baru. Demi keamanan, password tidak dapat dipulihkan melalui halaman login.</p><button type="button" data-forgot-password-close>Mengerti</button></section></div>
+{% endblock %}

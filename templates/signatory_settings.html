@@ -1,0 +1,21 @@
+{% extends "app_layout.html" %}
+{% block title %}Konfigurasi TTD — Intel Dashboard{% endblock %}
+{% block page_title %}Konfigurasi Penandatangan{% endblock %}
+{% block app_content %}
+<section class="page-heading"><div><p class="section-kicker">KONFIGURASI</p><h1>Data Penandatangan</h1><p>Data ini otomatis digunakan dalam preview dan dokumen LAPINHAR.</p></div></section>
+<div class="signatory-config-grid">
+{% for signer in signatories %}
+  <section class="content-card signatory-config-card">
+    <div class="config-card-head"><span>{{ loop.index|string|upper }}</span><div><h2>{{ 'Kepala Kejaksaan Negeri' if signer.position_code == 'kajari' else ('Kasi Intelijen' if signer.position_code == 'kasi_intel' else ('Kasubsi I' if signer.position_code == 'kasubsi_1' else 'Kasubsi II')) }}</h2><small>{{ 'Penandatangan Surat Pengantar LAPINSUS' if signer.position_code == 'kajari' else ('Autentikasi tetap' if signer.position_code == 'kasi_intel' else 'Pembuat laporan') }}</small></div></div>
+    <form method="post" class="admin-form">
+      <input type="hidden" name="position_code" value="{{ signer.position_code }}">
+      <label>Nama jabatan<input name="position_name" value="{{ signer.position_name }}" required></label>
+      <label>Nama lengkap dan gelar<input name="full_name" value="{{ signer.full_name }}" required placeholder="Nama lengkap, S.H."></label>
+      <label>Pangkat dan NIP<input name="rank_nip" value="{{ signer.rank_nip }}" required placeholder="Pangkat NIP. ..."></label>
+      {% if signer.position_code == 'kajari' %}<label class="tte-config-check"><input type="checkbox" name="use_tte" value="1" {{ 'checked' if signer.use_tte else '' }}><span><strong>Gunakan TTE Kajari</strong><small>Tampilkan gambar tte_kajari.png pada Surat Pengantar LAPINSUS</small></span></label>{% endif %}
+      <button class="primary-button" type="submit">Simpan perubahan</button>
+    </form>
+  </section>
+{% endfor %}
+</div>
+{% endblock %}

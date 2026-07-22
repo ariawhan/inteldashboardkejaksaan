@@ -1,0 +1,11 @@
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS recipient VARCHAR(255) NULL AFTER recommendation;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS sender_name VARCHAR(255) NULL AFTER recipient;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS classification VARCHAR(50) NULL AFTER sender_name;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS attachment VARCHAR(100) NULL AFTER classification;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS organization VARCHAR(255) NULL AFTER attachment;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS creator_position VARCHAR(255) NULL AFTER organization;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS creator_name VARCHAR(255) NULL AFTER creator_position;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS creator_rank_nip VARCHAR(255) NULL AFTER creator_name;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS auth_position VARCHAR(255) NULL AFTER creator_rank_nip;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS auth_name VARCHAR(255) NULL AFTER auth_position;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS auth_rank_nip VARCHAR(255) NULL AFTER auth_name;

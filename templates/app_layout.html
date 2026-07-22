@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <a class="sidebar-brand" href="{{ url_for('dashboard') }}">
+      <span class="brand-mark"><svg viewBox="0 0 48 48"><path d="M24 4 41 14v20L24 44 7 34V14L24 4Z"/><path d="m16 25 5 5 11-13"/></svg></span>
+      <span>INTEL<span class="brand-accent">DASH</span></span>
+    </a>
+    <nav class="sidebar-nav">
+      <p>MENU UTAMA</p>
+      <a class="{{ 'active' if active == 'dashboard' }}" href="{{ url_for('dashboard') }}"><span class="nav-icon">⌂</span> Dashboard</a>
+      <p>LAPORAN</p>
+      <a class="{{ 'active' if active == 'lapinhar' }}" href="{{ url_for('lapinhar') }}"><span class="nav-icon">▤</span> LAPINHAR</a>
+      <a class="{{ 'active' if active == 'lapinsus' }}" href="{{ url_for('lapinsus') }}"><span class="nav-icon">◇</span> LAPINSUS</a>
+      <p>KONFIGURASI AKUN</p>
+      <a class="{{ 'active' if active == 'integration_settings' }}" href="{{ url_for('integration_settings') }}"><span class="nav-icon">⚙</span> Konfigurasi Integrasi</a>
+      {% if session.role == 'admin' %}
+      <p>ADMINISTRASI</p>
+      <a class="{{ 'active' if active == 'users' }}" href="{{ url_for('users') }}"><span class="nav-icon">♙</span> Pengguna</a>
+      <a class="{{ 'active' if active == 'organization' }}" href="{{ url_for('organization_settings') }}"><span class="nav-icon">▣</span> Konfigurasi Instansi</a>
+      <a class="{{ 'active' if active == 'signatories' }}" href="{{ url_for('signatory_settings') }}"><span class="nav-icon">⚙</span> Konfigurasi TTD</a>
+      {% endif %}
+    </nav>
+    <div class="sidebar-meta"><span class="online-dot"></span><div><strong>Sistem Online</strong><small>Database terhubung</small></div></div>
+  </aside>
+  <div class="app-main">
+    <header class="topbar">
+      <button class="menu-toggle" type="button" data-sidebar-toggle aria-label="Buka menu">☰</button>
+      <div class="topbar-title"><strong>{% block page_title %}Dashboard{% endblock %}</strong><small>Sistem Penyusunan Laporan Intelijen</small></div>
+      <div class="profile-menu">
+        <button type="button" class="profile-trigger" data-profile-toggle>
+          <span class="avatar">{{ session.full_name[:1] | upper }}</span>
+          <span class="profile-text"><strong>{{ session.full_name }}</strong><small>{{ session.role | upper }}</small></span><span>⌄</span>
+        </button>
+        <div class="profile-dropdown" data-profile-dropdown>
+          <div><strong>{{ session.full_name }}</strong><small>@{{ session.username }}</small></div>
+          <form action="{{ url_for('logout') }}" method="post"><button type="submit">Keluar dari sistem</button></form>
+        </div>
+      </div>
+    </header>
+    <main class="page-content">
+      {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="alert {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+      {% block app_content %}{% endblock %}
+    </main>
+    <footer class="app-footer"><span>© 2026 Intel Dashboard</span><span>Versi 1.0.0 · Sistem aktif</span></footer>
+  </div>
+</div>
+{% endblock %}

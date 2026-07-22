@@ -1,0 +1,18 @@
+{% extends "app_layout.html" %}
+{% block title %}Konfigurasi WhatsApp — Intel Dashboard{% endblock %}
+{% block page_title %}Konfigurasi WhatsApp{% endblock %}
+{% block app_content %}
+<section class="page-heading">
+  <div><p class="section-kicker">KONFIGURASI AKUN</p><h1>Tujuan WhatsApp</h1><p>Atur penerima laporan yang akan dibuka melalui WhatsApp Web.</p></div>
+</section>
+<section class="content-card whatsapp-settings-card">
+  <div class="card-heading"><div><h2>Kontak Penerima</h2><p>Konfigurasi ini khusus untuk akun Anda. Nomor otomatis diubah ke format Indonesia (+62).</p></div>{% if setting %}<span class="inteliz-configured">Terkonfigurasi</span>{% endif %}</div>
+  <form method="post" class="admin-form" autocomplete="off">
+    <input type="hidden" name="next" value="{{ next_url }}">
+    <label>Nama / Jabatan Tujuan<input name="contact_name" value="{{ request.form.get('contact_name', setting.contact_name if setting else 'Asisten Intelijen Kejaksaan Tinggi Bali') }}" required placeholder="Contoh: Asisten Intelijen Kejaksaan Tinggi Bali"></label>
+    <label>Nomor WhatsApp<input name="phone_number" inputmode="tel" value="{{ request.form.get('phone_number', setting.phone_number if setting else '') }}" required placeholder="Contoh: 081234567890"></label>
+    <p class="credential-hint">Tombol Kirim WA membuka WhatsApp Web dengan template laporan yang telah terisi. Anda tetap menekan tombol kirim sendiri.</p>
+    <button class="primary-button" type="submit">Simpan Konfigurasi</button>
+  </form>
+</section>
+{% endblock %}
