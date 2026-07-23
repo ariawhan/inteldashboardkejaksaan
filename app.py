@@ -73,6 +73,11 @@ INTELIZ_2FA_PATH = "/2fa/challenge"
 INTELIZ_LAPINHAR_CREATE_URL = "https://inteliz.kejaksaan.go.id/lapinhar/create"
 INTELIZ_AUTH_SESSIONS = {}
 INTELIZ_AUTH_LOCK = threading.Lock()
+SIPEDE_LOGIN_URL = "https://sipede.kejaksaan.go.id/login"
+SIPEDE_BASE_URL = "https://sipede.kejaksaan.go.id"
+SIPEDE_SURATKELUAR_CREATE_URL = "https://sipede.kejaksaan.go.id/suratkeluar/create?idSurat=125"
+SIPEDE_AUTH_SESSIONS = {}
+SIPEDE_AUTH_LOCK = threading.Lock()
 
 
 class IntelizAuthenticationRequired(RuntimeError):
@@ -1327,13 +1332,214 @@ def upload_lapinsus_sipede(report_id):
     report = accessible_lapinsus(report_id)
     if report is None:
         return jsonify(message="LAPINSUS tidak ditemukan atau bukan milik Anda."), 403
-    setting = fetch_one("SELECT sipede_username,sipede_password_encrypted FROM sipede_user_settings WHERE user_id=%s",
+    setting = fetch_one("""SELECT sipede_username,sipede_password_encrypted,
+                        session_data_encrypted,connected_at
+                        FROM sipede_user_settings WHERE user_id=%s""",
                         (session["user_id"],))
     if not setting:
         return jsonify(message="Konfigurasi Sipede belum tersedia. Isi username dan password pada Konfigurasi Integrasi."), 409
     if report.get("sipede_status") == "sudah":
         return jsonify(message="LAPINSUS sudah diupload ke Sipede."), 200
-    return jsonify(message="Kredensial Sipede sudah tersedia, tetapi alamat login dan alur form upload Sipede belum dikonfigurasi pada automasi."), 501
+    if not setting.get("session_data_encrypted") or not setting.get("connected_at"):
+        return jsonify(message="Login SIPede diperlukan.", requires_sipede_login=True), 401
+    session_data = get_sipede_session_data(session["user_id"])
+    if not session_data:
+        return jsonify(message="Login SIPede diperlukan.", requires_sipede_login=True), 401
+    try:
+        http_session = requests.Session()
+        for cookie in session_data.get("cookies", []):
+            http_session.cookies.set(
+                cookie.get("name", ""), cookie.get("value", ""),
+                domain=cookie.get("domain") or "sipede.kejaksaan.go.id",
+                path=cookie.get("path") or "/",
+            )
+        response = http_session.get(
+            SIPEDE_SURATKELUAR_CREATE_URL,
+            headers={"Accept": "text/html,application/xhtml+xml", "Referer": f"{SIPEDE_BASE_URL}/"},
+            timeout=60,
+        )
+        create_context = sipede_create_context_from_html(response.text, response.url)
+        if "/login" in urlparse(response.url).path.lower() or not create_context:
+            with get_db().cursor() as cursor:
+                cursor.execute(
+                    "UPDATE sipede_user_settings SET connected_at=NULL WHERE user_id=%s",
+                    (session["user_id"],),
+                )
+            return jsonify(message="Sesi SIPede kedaluwarsa.", requires_sipede_login=True), 401
+        kajari = fetch_one("SELECT full_name,position_name FROM signatories WHERE position_code='kajari'")
+        kajari_name = kajari.get("full_name", "") if kajari else ""
+        signatory_id = sipede_signatory_id(create_context, kajari_name)
+        if not signatory_id:
+            return jsonify(
+                message=(f"Penandatangan {kajari_name or 'Kepala Kejaksaan Negeri'} tidak ditemukan "
+                         "pada daftar SIPede. Periksa Konfigurasi Tanda Tangan."),
+            ), 422
+        issue_code = sipede_issue_code_value(create_context, report.get("issue_code"))
+        if not issue_code:
+            return jsonify(
+                message=(f"Kode masalah {report.get('issue_code') or 'LAPINSUS'} tidak ditemukan "
+                         "pada daftar Kode Masalah SIPede."),
+            ), 422
+        create_context["selected_kode_masalah"] = issue_code
+        create_context["selected_penandatangan"] = str(signatory_id)
+
+        ajax_headers = {
+            "Accept": "*/*",
+            "Referer": SIPEDE_SURATKELUAR_CREATE_URL,
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        csrf_token = create_context.get("csrf_token", "")
+        if not csrf_token:
+            return jsonify(message="Token form Surat Keluar SIPede tidak ditemukan."), 422
+        temporary_number_key = f"sipede_upload_number_{report_id}"
+        submitted_sipede_number = request.form.get("sipede_number", "").strip() if request.files.get("document") else ""
+        temporary_sipede_number = str(session.get(temporary_number_key) or "").strip()
+        if submitted_sipede_number:
+            if (not temporary_sipede_number or submitted_sipede_number != temporary_sipede_number
+                    or len(submitted_sipede_number) > 150
+                    or re.search(r"[\r\n]", submitted_sipede_number)):
+                return jsonify(message="Nomor SIPede sementara tidak valid. Ulangi proses upload."), 409
+            sipede_number = temporary_sipede_number
+        else:
+            sipede_number = str(report.get("sipede_number") or "").strip()
+        if not sipede_number or sipede_number == "-":
+            auto_number_response = http_session.get(
+                f"{SIPEDE_BASE_URL}/suratkeluar/check-auto-number",
+                params={"surat": "23"}, headers=ajax_headers, timeout=30,
+            )
+            auto_number_response.raise_for_status()
+            number_response = http_session.post(
+                f"{SIPEDE_BASE_URL}/getnosurat/cekno",
+                headers={**ajax_headers, "X-CSRF-TOKEN": csrf_token},
+                data={
+                    "_token": csrf_token, "jenis_surat": "23",
+                    "tanggal": str(report.get("report_date") or date.today().isoformat()),
+                    "penandatangan": str(signatory_id), "sifat_surat": "R",
+                },
+                timeout=30,
+            )
+            number_response.raise_for_status()
+            sipede_number = number_response.text.strip().strip('"')
+            if not sipede_number or "<html" in sipede_number.lower():
+                return jsonify(message="Nomor sequence surat tidak diterima dari SIPede."), 502
+            session[temporary_number_key] = sipede_number
+            session.modified = True
+
+        destinations_response = http_session.get(
+            f"{SIPEDE_BASE_URL}/suratkeluar/get-master-tujuan-disposisi",
+            headers={**ajax_headers, "X-CSRF-TOKEN": csrf_token},
+            timeout=30,
+        )
+        destinations_response.raise_for_status()
+        try:
+            destinations_payload = destinations_response.json()
+        except ValueError:
+            return jsonify(message="Daftar tujuan SIPede tidak dapat dibaca."), 502
+        destination_rows = destinations_payload.get("data", []) if isinstance(destinations_payload, dict) else []
+        destinations = []
+        for item in destination_rows:
+            users = item.get("user") or []
+            user_name = users[0].get("nama", "NO USER") if users and isinstance(users[0], dict) else "NO USER"
+            destinations.append({
+                "id": str(item.get("id_tujuan_penerusan", "")),
+                "position": str(item.get("nama_jabatan", "")).strip(),
+                "user": str(user_name).strip() or "NO USER",
+            })
+        destinations = [item for item in destinations if item["id"] and item["position"]]
+        if not destinations:
+            return jsonify(message="Daftar tujuan disposisi SIPede masih kosong."), 422
+
+        selected_destinations = []
+        if request.files.get("document"):
+            try:
+                selected_destinations = json.loads(request.form.get("destinations", "[]"))
+            except (TypeError, ValueError):
+                selected_destinations = []
+            allowed_destination_ids = {item["id"] for item in destinations}
+            selected_destinations = [str(item) for item in selected_destinations
+                                     if str(item) in allowed_destination_ids]
+            if not selected_destinations:
+                return jsonify(message="Pilih minimal satu tujuan SIPede."), 422
+            document = request.files["document"]
+            document_bytes = document.read()
+            if not document_bytes or len(document_bytes) > 18_000_000:
+                return jsonify(message="Dokumen PDF LAPINSUS tidak valid atau terlalu besar."), 422
+            organization = fetch_one("SELECT * FROM organization_settings WHERE id=1") or {
+                "organization_name": "Kejaksaan Negeri Buleleng"
+            }
+            submit_data = {
+                "_token": csrf_token,
+                "suratmasuk": "",
+                "nomor": sipede_number,
+                "tanggal": str(report.get("report_date") or date.today().isoformat()),
+                "jenis": "23",
+                "sifat": "R",
+                "kode_masalah": issue_code,
+                "tujuan": "Yth.\nKepala Kejaksaan Tinggi Bali\nDi - Denpasar",
+                "dari": str((kajari or {}).get("position_name") or
+                            f"Kepala {organization.get('organization_name', 'Kejaksaan Negeri Buleleng')}"),
+                "hal": str(report.get("title") or report.get("subject") or "LAPINSUS"),
+                "penandatangan": str(signatory_id),
+                "idSurat": "125",
+                "idSuratMasuk": "",
+                "tujuan_surat": ",".join(selected_destinations),
+                "submitModal": "ok",
+            }
+            submit_response = http_session.post(
+                create_context.get("form_action") or f"{SIPEDE_BASE_URL}/suratkeluar",
+                headers={
+                    "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
+                               "image/avif,image/webp,image/apng,*/*;q=0.8"),
+                    "Accept-Language": "id,en-US;q=0.9,en;q=0.8",
+                    "Cache-Control": "max-age=0",
+                    "Origin": SIPEDE_BASE_URL,
+                    "Referer": SIPEDE_SURATKELUAR_CREATE_URL,
+                    "Upgrade-Insecure-Requests": "1",
+                    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                   "Chrome/150.0.0.0 Safari/537.36"),
+                },
+                data=submit_data,
+                files={"upload": (document.filename or "LAPINSUS.pdf", document_bytes, "application/pdf")},
+                timeout=90,
+                allow_redirects=True,
+            )
+            submit_response.raise_for_status()
+            submit_soup = BeautifulSoup(submit_response.text, "html.parser")
+            returned_form = submit_soup.select_one('#formCreateEdit, form[action$="/suratkeluar"]')
+            error_node = submit_soup.select_one('.alert-danger, .invalid-feedback, .text-danger')
+            if returned_form and urlparse(submit_response.url).path.rstrip("/").endswith("/create"):
+                error_message = error_node.get_text(" ", strip=True) if error_node else "SIPede belum menerima surat."
+                return jsonify(message=error_message), 422
+            with get_db().cursor() as cursor:
+                cursor.execute(
+                    "UPDATE lapinsus_reports SET sipede_number=%s,sipede_status='sudah' WHERE id=%s",
+                    (sipede_number, report_id),
+                )
+            session.pop(temporary_number_key, None)
+            session.modified = True
+            save_refreshed_sipede_session(session["user_id"], session_data, http_session, create_context)
+            flash("LAPINSUS berhasil dikirim ke SIPede.", "success")
+            return jsonify(
+                message="LAPINSUS berhasil dikirim ke SIPede.",
+                uploaded=True,
+                sipede_number=sipede_number,
+                redirect_url=url_for("lapinsus"),
+            )
+
+        save_refreshed_sipede_session(session["user_id"], session_data, http_session, create_context)
+        return jsonify(
+            message="Nomor sequence surat SIPede berhasil diperoleh.",
+            sipede_connected=True,
+            sipede_number=sipede_number,
+            signatory_id=str(signatory_id),
+            signatory_name=kajari_name,
+            kode_masalah=issue_code,
+            destinations=destinations,
+        ), 202
+    except requests.RequestException as exc:
+        app.logger.warning("Form Surat Keluar SIPede gagal dibuka: %s", exc)
+        return jsonify(message="SIPede tidak dapat dihubungi. Silakan coba lagi."), 502
 
 
 def rich_text_blocks(content):
@@ -1840,6 +2046,284 @@ def run_inteliz_auth(auth_id, user_id, credentials):
                 pass
 
 
+def get_sipede_credentials(user_id):
+    row = fetch_one(
+        "SELECT sipede_username, sipede_password_encrypted FROM sipede_user_settings WHERE user_id=%s",
+        (user_id,),
+    )
+    if not row or not row.get("sipede_password_encrypted"):
+        return None
+    try:
+        password = inteliz_credential_cipher().decrypt(
+            row["sipede_password_encrypted"].encode("ascii")
+        ).decode("utf-8")
+    except Exception:
+        app.logger.error("Kredensial SIPede pengguna %s tidak dapat didekripsi.", user_id)
+        return None
+    return {"username": row["sipede_username"], "password": password}
+
+
+def get_sipede_session_data(user_id):
+    row = fetch_one(
+        "SELECT session_data_encrypted FROM sipede_user_settings WHERE user_id=%s",
+        (user_id,),
+    )
+    if not row or not row.get("session_data_encrypted"):
+        return None
+    try:
+        decrypted = inteliz_credential_cipher().decrypt(
+            row["session_data_encrypted"].encode("ascii")
+        )
+        return json.loads(decrypted.decode("utf-8"))
+    except Exception:
+        app.logger.error("Sesi SIPede pengguna %s tidak dapat didekripsi.", user_id)
+        return None
+
+
+def sipede_create_context_from_html(html, response_url):
+    soup = BeautifulSoup(html, "html.parser")
+    form = soup.select_one('#formCreateEdit, form[action$="/suratkeluar"]')
+    if not form:
+        return None
+    token = form.select_one('input[name="_token"]') or soup.select_one('meta[name="csrf-token"]')
+    def options_of(name):
+        return [
+            {"value": option.get("value", ""), "label": option.get_text(" ", strip=True)}
+            for option in form.select(f'[name="{name}"] option[value]')
+            if option.get("value")
+        ]
+
+    return {
+        "csrf_token": (token.get("value") or token.get("content") or "") if token else "",
+        "form_action": form.get("action") or f"{SIPEDE_BASE_URL}/suratkeluar",
+        "form_method": (form.get("method") or "post").upper(),
+        "form_enctype": form.get("enctype") or "multipart/form-data",
+        "id_surat": (form.select_one('input[name="idSurat"]') or {}).get("value", "125"),
+        "jenis_options": options_of("jenis"),
+        "sifat_options": options_of("sifat"),
+        "kode_masalah_options": options_of("kode_masalah"),
+        "penandatangan_options": options_of("penandatangan"),
+        "field_names": [field.get("name") for field in form.select("input[name],select[name],textarea[name]")],
+        "captured_url": response_url,
+    }
+
+
+def sipede_signatory_id(create_context, configured_name):
+    normalized_target = re.sub(r"[^A-Z0-9]", "", (configured_name or "").upper())
+    if not normalized_target:
+        return None
+    for option in create_context.get("penandatangan_options", []):
+        normalized_label = re.sub(r"[^A-Z0-9]", "", option.get("label", "").upper())
+        if normalized_target in normalized_label:
+            return option.get("value")
+    return None
+
+
+def sipede_issue_code_value(create_context, report_issue_code):
+    target = (report_issue_code or "").strip()
+    if not target:
+        return None
+    for option in create_context.get("kode_masalah_options", []):
+        if option.get("value", "").strip().casefold() == target.casefold():
+            return option.get("value", "").strip()
+    normalized_target = re.sub(r"[^A-Z0-9]", "", target.upper())
+    for option in create_context.get("kode_masalah_options", []):
+        value = option.get("value", "").strip()
+        label = option.get("label", "")
+        normalized_value = re.sub(r"[^A-Z0-9]", "", value.upper())
+        normalized_label = re.sub(r"[^A-Z0-9]", "", label.upper())
+        if normalized_target == normalized_value or normalized_target in normalized_label:
+            return value
+    return None
+
+
+def save_refreshed_sipede_session(user_id, session_data, http_session, create_context):
+    session_data["cookies"] = [
+        {
+            "name": cookie.name,
+            "value": cookie.value,
+            "domain": cookie.domain,
+            "path": cookie.path,
+            "secure": cookie.secure,
+        }
+        for cookie in http_session.cookies
+    ]
+    session_data["suratkeluar_create"] = create_context or {}
+    session_data["captured_url"] = (create_context or {}).get("captured_url", SIPEDE_SURATKELUAR_CREATE_URL)
+    session_data["captured_at"] = int(time.time())
+    encrypted = inteliz_credential_cipher().encrypt(
+        json.dumps(session_data, ensure_ascii=False).encode("utf-8")
+    ).decode("ascii")
+    with get_db().cursor() as cursor:
+        cursor.execute(
+            """UPDATE sipede_user_settings SET session_data_encrypted=%s,
+               connected_at=CURRENT_TIMESTAMP WHERE user_id=%s""",
+            (encrypted, user_id),
+        )
+
+
+def update_sipede_auth(auth_id, **values):
+    with SIPEDE_AUTH_LOCK:
+        state = SIPEDE_AUTH_SESSIONS.get(auth_id)
+        if state:
+            state.update(values, updated_at=time.time())
+
+
+def wait_sipede_auth_input(auth_id, field, timeout=600):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with SIPEDE_AUTH_LOCK:
+            state = SIPEDE_AUTH_SESSIONS.get(auth_id)
+            if not state or state.get("cancelled"):
+                return None
+            value = state.pop(field, None)
+        if value:
+            return value
+        time.sleep(.25)
+    return None
+
+
+def read_sipede_create_context(page):
+    return page.evaluate("""() => {
+        const form = document.querySelector('#formCreateEdit') ||
+            document.querySelector('form[action$="/suratkeluar"]');
+        const optionsOf = (name) => Array.from(document.querySelectorAll(`[name="${name}"] option`))
+            .map(option => ({ value: option.value, label: option.textContent.trim() }))
+            .filter(option => option.value);
+        const valueOf = (name) => document.querySelector(`[name="${name}"]`)?.value || '';
+        return {
+            csrf_token: valueOf('_token') || document.querySelector('meta[name="csrf-token"]')?.content || '',
+            form_action: form?.action || 'https://sipede.kejaksaan.go.id/suratkeluar',
+            form_method: (form?.method || 'post').toUpperCase(),
+            form_enctype: form?.enctype || 'multipart/form-data',
+            id_surat: valueOf('idSurat') || '125',
+            jenis_options: optionsOf('jenis'),
+            sifat_options: optionsOf('sifat'),
+            kode_masalah_options: optionsOf('kode_masalah'),
+            penandatangan_options: optionsOf('penandatangan'),
+            field_names: form ? Array.from(form.elements).map(field => field.name).filter(Boolean) : []
+        };
+    }""")
+
+
+def persist_sipede_browser_session(user_id, context, page, create_context=None):
+    cookies = context.cookies([SIPEDE_BASE_URL])
+    local_storage = page.evaluate(
+        "Object.fromEntries(Array.from({length: localStorage.length}, (_, i) => "
+        "[localStorage.key(i), localStorage.getItem(localStorage.key(i))]))"
+    )
+    payload = {
+        "cookies": cookies,
+        "local_storage": local_storage,
+        "suratkeluar_create": create_context or {},
+        "captured_url": page.url,
+        "captured_at": int(time.time()),
+    }
+    encrypted = inteliz_credential_cipher().encrypt(
+        json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    ).decode("ascii")
+    with app.app_context():
+        with get_db().cursor() as cursor:
+            cursor.execute(
+                """UPDATE sipede_user_settings
+                   SET session_data_encrypted=%s, connected_at=CURRENT_TIMESTAMP
+                   WHERE user_id=%s""",
+                (encrypted, user_id),
+            )
+    return len(cookies)
+
+
+def run_sipede_auth(auth_id, user_id, credentials):
+    browser = None
+    try:
+        if not CHROME_EXECUTABLE.exists():
+            raise RuntimeError("Google Chrome tidak ditemukan pada komputer server.")
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(
+                executable_path=str(CHROME_EXECUTABLE),
+                headless=os.getenv("SIPEDE_BROWSER_HEADLESS", "0") == "1",
+                slow_mo=int(os.getenv("SIPEDE_BROWSER_SLOW_MO", "250")),
+                args=["--disable-blink-features=AutomationControlled"],
+            )
+            context = browser.new_context(viewport={"width": 1280, "height": 900}, locale="id-ID")
+            page = context.new_page()
+            update_sipede_auth(auth_id, status="loading", message="Membuka halaman SIPede…")
+            page.goto(SIPEDE_LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
+
+            authenticated = False
+            for _attempt in range(3):
+                page.locator('#username, input[name="username"]').first.fill(credentials["username"])
+                page.locator('input[name="password"]').first.fill(credentials["password"])
+                captcha_image = page.locator('.captcha img, img[src*="captcha" i]').first
+                captcha_image.wait_for(state="visible", timeout=30000)
+                captcha_data = base64.b64encode(captcha_image.screenshot(type="png")).decode("ascii")
+                update_sipede_auth(
+                    auth_id,
+                    status="captcha",
+                    captcha=f"data:image/png;base64,{captcha_data}",
+                    message="Masukkan kode CAPTCHA SIPede yang tampil.",
+                )
+                captcha_value = wait_sipede_auth_input(auth_id, "captcha_input")
+                if captcha_value is None:
+                    raise RuntimeError("Sesi login SIPede dibatalkan atau kedaluwarsa.")
+                page.locator('#captcha, input[name="captcha"]').first.fill(captcha_value)
+                page.locator('form[action*="login-post"] button[type="submit"], button[type="submit"]').first.click()
+                try:
+                    page.wait_for_function(
+                        "() => !location.pathname.replace(/\\/$/, '').endsWith('/login')",
+                        timeout=30000,
+                    )
+                except Exception:
+                    page.wait_for_timeout(1200)
+                if "/login" not in urlparse(page.url).path.lower():
+                    authenticated = True
+                    break
+                update_sipede_auth(
+                    auth_id,
+                    status="loading",
+                    captcha=None,
+                    message="Login belum diterima. Memuat CAPTCHA baru…",
+                )
+
+            if not authenticated:
+                raise RuntimeError("Login SIPede belum berhasil. Periksa CAPTCHA, username, atau password.")
+            cookie_count = persist_sipede_browser_session(user_id, context, page)
+            if not cookie_count:
+                raise RuntimeError("Halaman SIPede terbuka, tetapi cookie sesi tidak ditemukan.")
+            update_sipede_auth(
+                auth_id,
+                status="loading",
+                captcha=None,
+                message="Cookie tersimpan. Membuka formulir Surat Keluar SIPede…",
+            )
+            create_context = None
+            try:
+                page.goto(SIPEDE_SURATKELUAR_CREATE_URL, wait_until="domcontentloaded", timeout=60000)
+                page.locator('#formCreateEdit, form[action$="/suratkeluar"]').first.wait_for(
+                    state="attached", timeout=30000
+                )
+                create_context = read_sipede_create_context(page)
+                persist_sipede_browser_session(user_id, context, page, create_context)
+            except Exception as form_exc:
+                app.logger.warning("Cookie SIPede tersimpan, metadata form Surat Keluar belum terbaca: %s", form_exc)
+            update_sipede_auth(
+                auth_id,
+                status="success",
+                captcha=None,
+                message=("SIPede berhasil terhubung. Sesi, cookie, token, dan form Surat Keluar "
+                         "telah disimpan terenkripsi."),
+            )
+    except Exception as exc:
+        app.logger.warning("Login SIPede pengguna %s gagal: %s", user_id, exc)
+        update_sipede_auth(auth_id, status="error", captcha=None, message=str(exc))
+    finally:
+        if browser:
+            try:
+                browser.close()
+            except Exception:
+                pass
+
+
 @app.post("/lapinhar/export/<file_type>")
 @login_required
 def export_lapinhar(file_type):
@@ -2281,8 +2765,9 @@ def integration_settings():
                 with get_db().cursor() as cursor:
                     cursor.execute("""INSERT INTO sipede_user_settings (user_id,sipede_username,sipede_password_encrypted)
                     VALUES (%s,%s,%s) ON DUPLICATE KEY UPDATE sipede_username=VALUES(sipede_username),
-                    sipede_password_encrypted=VALUES(sipede_password_encrypted),updated_at=CURRENT_TIMESTAMP""",
-                                   (user_id, username, encrypted))
+                    sipede_password_encrypted=VALUES(sipede_password_encrypted),
+                    session_data_encrypted=NULL,connected_at=NULL,updated_at=CURRENT_TIMESTAMP""",
+                                    (user_id, username, encrypted))
                 flash("Konfigurasi Sipede berhasil disimpan terenkripsi.", "success")
                 return redirect(url_for("integration_settings", _anchor="sipede"))
         else:
@@ -2447,6 +2932,81 @@ def cancel_inteliz_connection(auth_id):
         state["status"] = "error"
         state["message"] = "Proses login dibatalkan."
     return jsonify(message="Proses login dibatalkan.")
+
+
+@app.post("/settings/sipede/connect/start")
+@login_required
+def start_sipede_connection():
+    credentials = get_sipede_credentials(session["user_id"])
+    if not credentials:
+        return jsonify(message="Simpan username dan password SIPede terlebih dahulu."), 400
+    auth_id = uuid.uuid4().hex
+    with SIPEDE_AUTH_LOCK:
+        for state in SIPEDE_AUTH_SESSIONS.values():
+            if state.get("user_id") == session["user_id"] and state.get("status") not in {"success", "error"}:
+                state["cancelled"] = True
+        SIPEDE_AUTH_SESSIONS[auth_id] = {
+            "user_id": session["user_id"],
+            "status": "starting",
+            "message": "Menyiapkan browser server…",
+            "captcha": None,
+            "cancelled": False,
+            "updated_at": time.time(),
+        }
+    threading.Thread(
+        target=run_sipede_auth,
+        args=(auth_id, session["user_id"], credentials),
+        daemon=True,
+        name=f"sipede-auth-{session['user_id']}",
+    ).start()
+    return jsonify(auth_id=auth_id, status="starting"), 202
+
+
+def owned_sipede_auth(auth_id):
+    with SIPEDE_AUTH_LOCK:
+        state = SIPEDE_AUTH_SESSIONS.get(auth_id)
+        if not state or state.get("user_id") != session.get("user_id"):
+            return None
+        return state
+
+
+@app.get("/settings/sipede/connect/<auth_id>/status")
+@login_required
+def sipede_connection_status(auth_id):
+    state = owned_sipede_auth(auth_id)
+    if state is None:
+        abort(404)
+    return jsonify(status=state["status"], message=state.get("message", ""),
+                   captcha=state.get("captcha"))
+
+
+@app.post("/settings/sipede/connect/<auth_id>/captcha")
+@login_required
+def submit_sipede_captcha(auth_id):
+    value = str((request.get_json(silent=True) or {}).get("captcha", "")).strip()
+    with SIPEDE_AUTH_LOCK:
+        state = SIPEDE_AUTH_SESSIONS.get(auth_id)
+        if not state or state.get("user_id") != session["user_id"]:
+            abort(404)
+        if state.get("status") != "captcha" or not value or len(value) > 20:
+            return jsonify(message="Kode CAPTCHA tidak valid."), 400
+        state["captcha_input"] = value
+        state["status"] = "loading"
+        state["message"] = "Memverifikasi CAPTCHA SIPede…"
+    return jsonify(message="CAPTCHA dikirim.")
+
+
+@app.post("/settings/sipede/connect/<auth_id>/cancel")
+@login_required
+def cancel_sipede_connection(auth_id):
+    with SIPEDE_AUTH_LOCK:
+        state = SIPEDE_AUTH_SESSIONS.get(auth_id)
+        if not state or state.get("user_id") != session["user_id"]:
+            abort(404)
+        state["cancelled"] = True
+        state["status"] = "error"
+        state["message"] = "Proses login SIPede dibatalkan."
+    return jsonify(message="Proses login SIPede dibatalkan.")
 
 
 @app.route("/settings/signatories", methods=["GET", "POST"])

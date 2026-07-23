@@ -29,6 +29,16 @@ const lapinharForm = document.querySelector("#lapinhar-form");
 const numberStatus = document.querySelector("[data-number-status]");
 const reloadNumberButton = document.querySelector("[data-reload-letter-number]");
 
+function updateSipedePreviewNumber(value) {
+  const number = String(value || "").trim() || "—";
+  document.querySelectorAll('[data-output="sipede-number"]').forEach(node => {
+    node.textContent = number === "-" ? "—" : number;
+  });
+}
+
+const sipedeNumberField = document.querySelector('input[name="sipede_number"]');
+updateSipedePreviewNumber(sipedeNumberField?.value);
+
 async function checkLetterNumber() {
   const response = await fetch(lapinharForm?.dataset.checkNumberUrl || "/lapinhar/check-number", {
     method: "POST",
@@ -813,24 +823,228 @@ document.querySelector("[data-export-preview-pdf]")?.addEventListener("click", (
   exportPreviewPdf(event.currentTarget);
 });
 
+const sipedeConfirmModal = document.querySelector("[data-sipede-confirm-modal]");
+let resolveSipedeConfirmation = null;
+
+function closeSipedeConfirmation(confirmed = false) {
+  if (!sipedeConfirmModal || sipedeConfirmModal.hidden) return;
+  sipedeConfirmModal.hidden = true;
+  document.body.classList.remove("sipede-confirm-open");
+  const resolve = resolveSipedeConfirmation;
+  resolveSipedeConfirmation = null;
+  resolve?.(confirmed);
+}
+
+function confirmSipedeUpload() {
+  if (!sipedeConfirmModal) return Promise.resolve(true);
+  sipedeConfirmModal.hidden = false;
+  document.body.classList.add("sipede-confirm-open");
+  sipedeConfirmModal.querySelector("[data-sipede-confirm-submit]")?.focus();
+  return new Promise((resolve) => { resolveSipedeConfirmation = resolve; });
+}
+
+sipedeConfirmModal?.querySelectorAll("[data-sipede-confirm-cancel]").forEach((button) =>
+  button.addEventListener("click", () => closeSipedeConfirmation(false)));
+sipedeConfirmModal?.querySelector("[data-sipede-confirm-submit]")?.addEventListener("click", () =>
+  closeSipedeConfirmation(true));
+
+const sipedeDestinationModal = document.querySelector("[data-sipede-destination-modal]");
+const sipedeDestinationList = sipedeDestinationModal?.querySelector("[data-sipede-destination-list]");
+const sipedeDestinationSearch = sipedeDestinationModal?.querySelector("[data-sipede-destination-search]");
+const sipedeDestinationAll = sipedeDestinationModal?.querySelector("[data-sipede-destination-all]");
+const sipedeDestinationCount = sipedeDestinationModal?.querySelector("[data-sipede-destination-count]");
+const sipedeDestinationSend = sipedeDestinationModal?.querySelector("[data-sipede-destination-send]");
+let sipedeDestinations = [];
+let sipedeUploadButton = null;
+
+function selectedSipedeDestinationIds() {
+  return Array.from(sipedeDestinationList?.querySelectorAll('input[type="checkbox"]:checked') || [])
+    .map(input => input.value);
+}
+
+function updateSipedeDestinationSelection() {
+  const selected = selectedSipedeDestinationIds();
+  if (sipedeDestinationCount) sipedeDestinationCount.textContent = `${selected.length} tujuan dipilih`;
+  if (sipedeDestinationSend) sipedeDestinationSend.disabled = selected.length === 0;
+  const visible = Array.from(sipedeDestinationList?.querySelectorAll('.sipede-destination-item:not([hidden]) input') || []);
+  if (sipedeDestinationAll) {
+    sipedeDestinationAll.checked = visible.length > 0 && visible.every(input => input.checked);
+    sipedeDestinationAll.indeterminate = visible.some(input => input.checked) && !sipedeDestinationAll.checked;
+  }
+}
+
+function filterSipedeDestinations() {
+  const query = (sipedeDestinationSearch?.value || "").trim().toLocaleLowerCase("id");
+  sipedeDestinationList?.querySelectorAll(".sipede-destination-item").forEach(item => {
+    item.hidden = Boolean(query) && !item.dataset.search.includes(query);
+  });
+  updateSipedeDestinationSelection();
+}
+
+function openSipedeDestinationModal(destinations, button) {
+  if (!sipedeDestinationModal || !sipedeDestinationList) return;
+  sipedeDestinations = Array.isArray(destinations) ? destinations : [];
+  sipedeUploadButton = button;
+  sipedeDestinationList.replaceChildren();
+  sipedeDestinations.forEach(destination => {
+    const label = document.createElement("label");
+    label.className = "sipede-destination-item";
+    label.dataset.search = `${destination.position || ""} ${destination.user || ""}`.toLocaleLowerCase("id");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = destination.id;
+    checkbox.addEventListener("change", updateSipedeDestinationSelection);
+    const text = document.createElement("span");
+    const position = document.createElement("strong");
+    position.textContent = destination.position || "Tujuan SIPede";
+    const user = document.createElement("small");
+    user.textContent = destination.user || "NO USER";
+    text.append(position, user);
+    label.append(checkbox, text);
+    sipedeDestinationList.append(label);
+  });
+  if (!sipedeDestinations.length) {
+    const empty = document.createElement("p");
+    empty.className = "sipede-destination-empty";
+    empty.textContent = "Tujuan SIPede belum tersedia.";
+    sipedeDestinationList.append(empty);
+  }
+  if (sipedeDestinationSearch) sipedeDestinationSearch.value = "";
+  if (sipedeDestinationAll) sipedeDestinationAll.checked = false;
+  updateSipedeDestinationSelection();
+  sipedeDestinationModal.hidden = false;
+  document.body.classList.add("sipede-confirm-open");
+  sipedeDestinationSearch?.focus();
+}
+
+function closeSipedeDestinationModal() {
+  if (!sipedeDestinationModal) return;
+  sipedeDestinationModal.hidden = true;
+  document.body.classList.remove("sipede-confirm-open");
+  sipedeUploadButton = null;
+}
+
+async function createSipedePdf() {
+  await preparePreviewForOutput();
+  const source = document.querySelector(".preview-pages");
+  const clone = source.cloneNode(true);
+  const sourceImages = Array.from(source.querySelectorAll("img"));
+  const cloneImages = Array.from(clone.querySelectorAll("img"));
+  const imageData = await Promise.all(sourceImages.map(imageAsDataUrl));
+  cloneImages.forEach((image, index) => { image.src = imageData[index]; });
+  const response = await fetch("/lapinhar/export-preview-pdf", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      html: clone.innerHTML,
+      report_number: document.querySelector('[name="report_number"]')?.value || "lapinsus",
+      report_date: document.querySelector('[name="report_date"]')?.value || "",
+      subject: document.querySelector('[name="subject"]')?.value || "",
+      reservation_token: document.querySelector('[name="number_reservation_token"]')?.value || "",
+      report_id: lapinharForm?.dataset.reportId || "",
+      document_kind: "lapinsus"
+    })
+  });
+  if (!response.ok) throw new Error(await response.text() || "PDF LAPINSUS gagal dibuat.");
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename\*?=(?:UTF-8''|\")?([^\";]+)/i);
+  return {
+    blob: await response.blob(),
+    filename: match ? decodeURIComponent(match[1].replace(/\"/g, "")) : "LAPINSUS.pdf"
+  };
+}
+
+sipedeDestinationSearch?.addEventListener("input", filterSipedeDestinations);
+sipedeDestinationAll?.addEventListener("change", () => {
+  sipedeDestinationList?.querySelectorAll('.sipede-destination-item:not([hidden]) input').forEach(input => {
+    input.checked = sipedeDestinationAll.checked;
+  });
+  updateSipedeDestinationSelection();
+});
+sipedeDestinationModal?.querySelectorAll("[data-sipede-destination-close]").forEach(button =>
+  button.addEventListener("click", closeSipedeDestinationModal));
+sipedeDestinationSend?.addEventListener("click", async () => {
+  const selected = selectedSipedeDestinationIds();
+  if (!selected.length || !sipedeUploadButton) return;
+  const original = sipedeDestinationSend.textContent;
+  sipedeDestinationSend.disabled = true;
+  sipedeDestinationSend.textContent = "Membuat PDF…";
+  try {
+    const pdf = await createSipedePdf();
+    sipedeDestinationSend.textContent = "Mengirim…";
+    const formData = new FormData();
+    formData.append("destinations", JSON.stringify(selected));
+    formData.append("sipede_number", document.querySelector('input[name="sipede_number"]')?.value || "");
+    formData.append("document", pdf.blob, pdf.filename);
+    const response = await fetch(sipedeUploadButton.dataset.url, {
+      method: "POST", headers: { "Accept": "application/json" }, body: formData
+    });
+    const result = await response.json();
+    if (result.requires_sipede_login) {
+      closeSipedeDestinationModal();
+      window.dispatchEvent(new CustomEvent("sipede-auth-start"));
+      return;
+    }
+    if (!response.ok || !result.uploaded) throw new Error(result.message || "Upload SIPede gagal.");
+    const completedUploadButton = sipedeUploadButton;
+    closeSipedeDestinationModal();
+    if (completedUploadButton) {
+      completedUploadButton.disabled = true;
+      completedUploadButton.textContent = "Sudah di SIPede";
+    }
+    document.querySelector("[data-sipede-upload-notice]")?.remove();
+    window.location.href = result.redirect_url || "/lapinsus";
+  } catch (error) {
+    alert(error.message || "LAPINSUS gagal dikirim ke SIPede.");
+    sipedeDestinationSend.disabled = false;
+    sipedeDestinationSend.textContent = original;
+  }
+});
+
 document.querySelector("[data-sipede-upload]")?.addEventListener("click", async (event) => {
   const button = event.currentTarget;
   if (button.dataset.afterSaveReady !== "true") return;
   if (!button.dataset.url) return alert("Simpan LAPINSUS terlebih dahulu sebelum upload ke Sipede.");
-  if (!confirm("Upload surat pengantar LAPINSUS ini ke Sipede sekarang?")) return;
+  if (!await confirmSipedeUpload()) return;
   const original = button.textContent;
   button.disabled = true;
   button.textContent = "Menghubungkan Sipede…";
   try {
     const response = await fetch(button.dataset.url, { method: "POST", headers: { "Accept": "application/json" } });
     const result = await response.json();
+    if (result.requires_sipede_login) {
+      button.disabled = false;
+      button.textContent = original;
+      window.dispatchEvent(new CustomEvent("sipede-auth-start"));
+      return;
+    }
     if (!response.ok) throw new Error(result.message || "Upload Sipede gagal.");
+    if (result.sipede_connected) {
+      const sipedeNumberInput = document.querySelector('input[name="sipede_number"]');
+      if (sipedeNumberInput && result.sipede_number) {
+        sipedeNumberInput.value = result.sipede_number;
+        updateSipedePreviewNumber(result.sipede_number);
+        await preparePreviewForOutput();
+      }
+      button.disabled = false;
+      button.textContent = original;
+      openSipedeDestinationModal(result.destinations, button);
+      return;
+    }
     button.textContent = "Sudah di Sipede";
     document.querySelector("[data-sipede-upload-notice]")?.remove();
   } catch (error) {
     alert(error.message);
     button.disabled = false;
     button.textContent = original;
+  }
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && sipedeConfirmModal && !sipedeConfirmModal.hidden) {
+    closeSipedeConfirmation(false);
+  }
+  if (event.key === "Escape" && sipedeDestinationModal && !sipedeDestinationModal.hidden) {
+    closeSipedeDestinationModal();
   }
 });
 window.addEventListener("beforeprint", paginateReportPreview);

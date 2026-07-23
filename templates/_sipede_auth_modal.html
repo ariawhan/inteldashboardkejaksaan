@@ -1,0 +1,18 @@
+<div class="inteliz-auth-modal" data-sipede-modal data-reload="{{ 'true' if sipede_reload|default(true) else 'false' }}" hidden>
+  <div class="inteliz-auth-dialog" role="dialog" aria-modal="true" aria-labelledby="sipede-auth-title">
+    <button type="button" class="inteliz-modal-close" data-sipede-close aria-label="Tutup">×</button>
+    <p class="section-kicker">LOGIN OTOMATIS</p>
+    <h2 id="sipede-auth-title">Hubungkan SIPede</h2>
+    <p data-sipede-message>Menyiapkan browser di komputer server…</p>
+    <div class="inteliz-auth-loading" data-sipede-loading><i></i><span>Mohon tunggu</span></div>
+    <form data-sipede-captcha-form hidden>
+      <img data-sipede-captcha-image alt="Gambar CAPTCHA SIPede">
+      <label>Kode CAPTCHA<input name="captcha" required autocomplete="off" maxlength="20" placeholder="Ketik kode pada gambar"></label>
+      <button class="primary-button">Kirim CAPTCHA</button>
+    </form>
+    <div class="inteliz-auth-success" data-sipede-success hidden>
+      <strong>✓ SIPede terhubung</strong>
+      <p>Cookie sesi telah disimpan terenkripsi.</p>
+    </div>
+  </div>
+</div>
