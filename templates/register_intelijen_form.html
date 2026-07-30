@@ -1,0 +1,74 @@
+{% extends "app_layout.html" %}
+{% block title %}{{ form_title }} — IndraOne{% endblock %}
+{% block page_title %}{{ form_title }}{% endblock %}
+{% block app_content %}
+<section class="editor-heading">
+  <div><p class="section-kicker">REGISTER INTELIJEN</p><h1>{{ form_title }}</h1><p>{{ form_description }}</p></div>
+  <a class="back-link" href="{{ url_for('register_intelijen') }}">← Kembali</a>
+</section>
+
+<form method="post" class="register-intel-form">
+  <section class="content-card register-form-card">
+    <div class="form-section-title"><span>01</span><div><strong>Data Register {{ register_type }}</strong><small>Isi data kerja intelijen untuk dicatat ke register.</small></div></div>
+    <div class="form-grid">
+      <label>
+        <span>Nama Satker</span>
+        <input type="text" value="{{ data.satker_name }}" readonly class="readonly-field">
+      </label>
+      <label>
+        <span>Tanggal Laporan</span>
+        <input type="date" name="report_date" value="{{ data.report_date }}" required>
+      </label>
+      <label>
+        <span>Bidang</span>
+        <select name="field_code" required>
+          <option value="">--- Pilih Bidang ---</option>
+          {% for code, label in issue_code_labels.items() %}
+          <option value="{{ code }}" {{ 'selected' if data.field_code == code else '' }}>{{ code }} — {{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Waktu Diterima</span>
+        <input type="time" name="received_time" value="{{ data.received_time }}">
+      </label>
+      <label>
+        <span>Sumber / Bapul</span>
+        <input type="text" name="source_name" value="{{ data.source_name }}">
+      </label>
+      <label>
+        <span>Nilai Data / Informasi</span>
+        <select name="information_value">
+          {% for item in information_values %}
+          <option value="{{ item }}" {{ 'selected' if data.information_value == item else '' }}>{{ item }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="full">
+        <span>Uraian Informasi</span>
+        <textarea name="information_description" rows="6" required>{{ data.information_description }}</textarea>
+      </label>
+      <label class="full">
+        <span>Catatan</span>
+        <textarea name="notes" rows="4">{{ data.notes }}</textarea>
+      </label>
+      <label class="full">
+        <span>Disposisi / Tindakan</span>
+        <textarea name="disposition" rows="4">{{ data.disposition }}</textarea>
+      </label>
+      <label class="full">
+        <span>Tindak Lanjut</span>
+        <textarea name="follow_up" rows="4">{{ data.follow_up }}</textarea>
+      </label>
+      <label class="full">
+        <span>Keterangan</span>
+        <input type="text" name="remarks" value="{{ data.remarks }}">
+      </label>
+    </div>
+  </section>
+  <div class="editor-actions register-form-actions">
+    <button type="submit" class="primary-button">{{ 'Simpan Perubahan' if entry else 'Simpan' }}</button>
+    <a class="outline-action" href="{{ url_for('register_intelijen') }}">Batal</a>
+  </div>
+</form>
+{% endblock %}

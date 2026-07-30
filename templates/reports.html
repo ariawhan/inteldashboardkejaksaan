@@ -1,22 +1,70 @@
 {% extends "app_layout.html" %}
-{% block title %}{{ report_type }} — Intel Dashboard{% endblock %}
+{% block title %}{{ report_type }} — IndraOne{% endblock %}
 {% block page_title %}{{ report_type }}{% endblock %}
 {% block app_content %}
 <section class="page-heading">
-  <div><p class="section-kicker">MODUL LAPORAN</p><h1>{{ report_type }}</h1><p>Kelola dan susun {{ report_type }} dari halaman ini.</p></div>
+  <div><p class="section-kicker">MODUL LAPORAN</p><h1>{{ report_type }}</h1><p>Kelola dan susun {{ report_type }}</p></div>
   <a class="primary-button" href="{{ url_for('create_lapinhar') if report_type == 'LAPINHAR' else url_for('create_lapinsus') }}">+ Buat {{ report_type }}</a>
 </section>
 {% if report_type == 'LAPINHAR' %}
+<section class="content-card lapinhar-issue-chart-card">
+  <div class="card-heading">
+    <div>
+      <h2>Grafik LAPINHAR</h2>
+      <span>Rekap tahun {{ current_year }}{% if chart_month != 'all' %} bulan {{ chart_month_name }}{% endif %} berdasarkan Kode Permasalahan Ds, Dip, Dsb, Dek, Dpp, dan Dti.</span>
+    </div>
+    <form method="get" class="lapinhar-chart-filter">
+      <input type="hidden" name="q" value="{{ search }}">
+      <label>
+        <span>Bulan</span>
+        <select name="chart_month" onchange="this.form.submit()">
+          <option value="all" {{ 'selected' if chart_month == 'all' else '' }}>Semua bulan</option>
+          {% for month_no in range(1, 13) %}
+          <option value="{{ month_no }}" {{ 'selected' if chart_month == month_no|string else '' }}>{{ month_names[month_no] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </form>
+  </div>
+  <div class="lapinhar-chartjs-wrap">
+    <canvas id="reportIssueChart" data-chart='{{ issue_chart_dataset|tojson }}'></canvas>
+  </div>
+</section>
 <section class="lapinhar-summary">
-  <article><span>Jumlah LAPINHAR</span><strong>{{ report_summary.total }}</strong></article>
-  <article class="pending"><span>LAPINHAR yang belum jadi LAPINSUS</span><strong>{{ report_summary.lapinsus_belum }}</strong></article>
-  <article class="pending-inteliz"><span>LAPINHAR yang belum upload Inteliz</span><strong>{{ report_summary.inteliz_belum }}</strong></article>
+  <article class="summary-total"><span>Jumlah LAPINHAR Tahun {{ current_year }}</span><strong>{{ report_summary.total }}</strong></article>
+  <article class="summary-lapinsus"><span>Belum jadi LAPINSUS Tahun {{ current_year }}</span><strong>{{ report_summary.lapinsus_belum }}</strong></article>
+  <article class="summary-inteliz"><span>Belum upload Inteliz Tahun {{ current_year }}</span><strong>{{ report_summary.inteliz_belum }}</strong></article>
+  <article class="summary-register"><span>Belum Register Tahun {{ current_year }}</span><strong>{{ report_summary.register_belum }}</strong></article>
 </section>
 {% elif report_type == 'LAPINSUS' %}
+<section class="content-card lapinhar-issue-chart-card">
+  <div class="card-heading">
+    <div>
+      <h2>Grafik LAPINSUS</h2>
+      <span>Rekap tahun {{ current_year }}{% if chart_month != 'all' %} bulan {{ chart_month_name }}{% endif %} berdasarkan Kode Permasalahan Ds, Dip, Dsb, Dek, Dpp, dan Dti.</span>
+    </div>
+    <form method="get" class="lapinhar-chart-filter">
+      <input type="hidden" name="q" value="{{ search }}">
+      <label>
+        <span>Bulan</span>
+        <select name="chart_month" onchange="this.form.submit()">
+          <option value="all" {{ 'selected' if chart_month == 'all' else '' }}>Semua bulan</option>
+          {% for month_no in range(1, 13) %}
+          <option value="{{ month_no }}" {{ 'selected' if chart_month == month_no|string else '' }}>{{ month_names[month_no] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </form>
+  </div>
+  <div class="lapinhar-chartjs-wrap">
+    <canvas id="reportIssueChart" data-chart='{{ issue_chart_dataset|tojson }}'></canvas>
+  </div>
+</section>
 <section class="lapinhar-summary lapinsus-summary">
-  <article><span>Total LAPINSUS</span><strong>{{ report_summary.total }}</strong></article>
-  <article class="pending-inteliz"><span>Belum upload Inteliz</span><strong>{{ report_summary.inteliz_belum }}</strong></article>
-  <article class="pending"><span>Belum upload Sipede</span><strong>{{ report_summary.sipede_belum }}</strong></article>
+  <article class="summary-total"><span>Total LAPINSUS Tahun {{ current_year }}</span><strong>{{ report_summary.total }}</strong></article>
+  <article class="summary-inteliz"><span>Belum upload Inteliz Tahun {{ current_year }}</span><strong>{{ report_summary.inteliz_belum }}</strong></article>
+  <article class="summary-sipede"><span>Belum upload Sipede Tahun {{ current_year }}</span><strong>{{ report_summary.sipede_belum }}</strong></article>
+  <article class="summary-register"><span>Belum Register Tahun {{ current_year }}</span><strong>{{ report_summary.register_belum }}</strong></article>
 </section>
 {% endif %}
 {% if reports or search %}
@@ -27,10 +75,10 @@
   </div>
   <div class="table-wrap"><table><thead><tr><th>Nomor</th><th>Perihal</th><th>Status</th><th>Dibuat Oleh</th><th>Tanggal dibuat</th><th>Aksi</th></tr></thead>
     <tbody>{% for report in reports %}<tr>
-      <td><strong>{{ report.report_number or '-' }}</strong></td><td>{{ report.title }}</td>
-      <td>{% if report_type == 'LAPINHAR' %}<div class="report-status-list"><span><b>Inteliz</b><em class="status-value {{ report.inteliz_status }}">{{ report.inteliz_status|capitalize }}</em></span><span><b>Lapinsus</b><em class="status-value {{ report.lapinsus_status }}">{{ report.lapinsus_status|capitalize }}</em></span></div>{% else %}<div class="report-status-list"><span><b>Inteliz</b><em class="status-value {{ report.inteliz_status }}">{{ report.inteliz_status|capitalize }}</em></span><span><b>Sipede</b><em class="status-value {{ report.sipede_status }}">{{ report.sipede_status|capitalize }}</em></span></div>{% endif %}</td>
+      <td><strong>{{ report.report_number or '-' }}</strong>{% if report.status == 'draft' %}<span class="report-draft-badge">Draf</span>{% endif %}</td><td>{{ report.title or 'Belum diisi' }}</td>
+      <td>{% if report_type == 'LAPINHAR' %}<div class="report-status-list"><span><b>Inteliz</b><em class="status-value {{ report.inteliz_status }}">{{ report.inteliz_status|capitalize }}</em></span><span><b>Lapinsus</b><em class="status-value {{ report.lapinsus_status }}">{{ report.lapinsus_status|capitalize }}</em></span><span><b>Register</b><em class="status-value {{ 'sudah' if report.is_registered else 'belum' }}">{{ 'Sudah' if report.is_registered else 'Belum' }}</em></span></div>{% else %}<div class="report-status-list"><span><b>Inteliz</b><em class="status-value {{ report.inteliz_status }}">{{ report.inteliz_status|capitalize }}</em></span><span><b>Sipede</b><em class="status-value {{ report.sipede_status }}">{{ report.sipede_status|capitalize }}</em></span><span><b>Register</b><em class="status-value {{ 'sudah' if report.is_registered else 'belum' }}">{{ 'Sudah' if report.is_registered else 'Belum' }}</em></span></div>{% endif %}</td>
       <td><span class="report-creator">{{ report.creator_full_name }}</span></td><td>{{ report.created_at.strftime('%d-%m-%Y') }}</td>
-      <td>{% if session.role == 'admin' or report.created_by == session.user_id %}<div class="report-actions">{% if report_type == 'LAPINHAR' %}{% if report.lapinsus_status == 'belum' %}<form id="lapinsus-convert-{{ report.id }}" method="post" action="{{ url_for('convert_lapinhar_to_lapinsus', report_id=report.id) }}"><button type="button" class="convert-lapinsus" data-lapinsus-convert data-form-id="lapinsus-convert-{{ report.id }}" data-number="{{ report.report_number|e }}" data-subject="{{ report.title|e }}">Lapinsuskan</button></form>{% endif %}{% if report.inteliz_status == 'belum' %}<form method="post" action="{{ url_for('sync_lapinhar_inteliz', report_id=report.id) }}" onsubmit="return confirm('Sinkronkan LAPINHAR {{ report.report_number|e }} ke Inteliz sekarang?')"><button type="submit" class="sync-inteliz">Sinkron Inteliz</button></form>{% else %}<span class="sync-complete">Tersinkron</span>{% endif %}<button type="button" class="send-whatsapp" data-whatsapp-send data-url="{{ url_for('send_lapinhar_whatsapp', report_id=report.id) }}" data-attachment-count="{{ report.attachment_count }}">Kirim WA</button><a href="{{ url_for('edit_lapinhar', report_id=report.id) }}">Edit</a><form method="post" action="{{ url_for('delete_lapinhar', report_id=report.id) }}" onsubmit="return confirm('Hapus LAPINHAR {{ report.report_number|e }}? Data dan lampiran tidak dapat dikembalikan.')"><button type="submit">Hapus</button></form>{% else %}<a href="{{ url_for('edit_lapinsus', report_id=report.id) }}">Edit</a><form method="post" action="{{ url_for('delete_lapinsus', report_id=report.id) }}" onsubmit="return confirm('Hapus LAPINSUS {{ report.report_number|e }}?')"><button type="submit">Hapus</button></form>{% endif %}</div>{% else %}<span class="report-readonly">Hanya lihat</span>{% endif %}</td>
+      <td>{% if session.role == 'admin' or report.created_by == session.user_id %}<div class="report-action-menu" data-report-action-menu><button type="button" class="report-action-toggle" data-report-action-toggle aria-expanded="false">Aksi</button><div class="report-actions" data-report-action-dropdown>{% if report.is_registered %}<span class="register-complete">Terdaftar R.IN.3 &amp; R.IN.5</span>{% else %}<button type="button" class="register-report-button" data-register-report data-url="{{ url_for('register_report_intelijen', report_type=report_type|lower, report_id=report.id) }}" data-report-label="{{ report_type }}" data-report-number="{{ report.report_number|e }}" data-report-subject="{{ report.title|e }}" {% if report.status == 'draft' %}disabled title="Lengkapi dan simpan {{ report_type }} terlebih dahulu"{% endif %}>Registerkan</button>{% endif %}{% if report_type == 'LAPINHAR' %}{% if report.lapinsus_status == 'belum' %}<form id="lapinsus-convert-{{ report.id }}" method="post" action="{{ url_for('convert_lapinhar_to_lapinsus', report_id=report.id) }}"><button type="button" class="convert-lapinsus" data-lapinsus-convert data-form-id="lapinsus-convert-{{ report.id }}" data-number="{{ report.report_number|e }}" data-subject="{{ report.title|e }}" {% if report.status == 'draft' %}disabled title="Lengkapi dan simpan LAPINHAR terlebih dahulu"{% endif %}>Lapinsuskan</button></form>{% endif %}{% if report.inteliz_status == 'belum' %}<form method="post" action="{{ url_for('sync_lapinhar_inteliz', report_id=report.id) }}" onsubmit="return confirm('Sinkronkan LAPINHAR {{ report.report_number|e }} ke Inteliz sekarang?')"><button type="submit" class="sync-inteliz" {% if report.status == 'draft' %}disabled title="Lengkapi dan simpan LAPINHAR terlebih dahulu"{% endif %}>Sinkron Inteliz</button></form>{% else %}<span class="sync-complete">Tersinkron</span>{% endif %}<button type="button" class="send-whatsapp" data-whatsapp-send data-url="{{ url_for('send_lapinhar_whatsapp', report_id=report.id) }}" data-report-label="LAPINHAR" data-attachment-count="{{ report.attachment_count }}" {% if report.status == 'draft' %}disabled title="Lengkapi dan simpan LAPINHAR terlebih dahulu"{% endif %}>Kirim WA</button><a href="{{ url_for('edit_lapinhar', report_id=report.id) }}">Edit</a><form method="post" action="{{ url_for('delete_lapinhar', report_id=report.id) }}" onsubmit="return confirm('Hapus LAPINHAR {{ report.report_number|e }}? Data dan lampiran tidak dapat dikembalikan.')"><button type="submit">Hapus</button></form>{% else %}{% if report.inteliz_status == 'belum' %}<form method="post" action="{{ url_for('sync_lapinsus_inteliz', report_id=report.id) }}" onsubmit="return confirm('Sinkronkan LAPINSUS {{ report.report_number|e }} ke Inteliz sekarang?')"><button type="submit" class="sync-inteliz" {% if report.status == 'draft' %}disabled title="Lengkapi dan simpan LAPINSUS terlebih dahulu"{% endif %}>Sinkron Inteliz</button></form>{% else %}<span class="sync-complete">Tersinkron</span>{% endif %}<button type="button" class="send-whatsapp" data-whatsapp-send data-url="{{ url_for('send_lapinsus_whatsapp', report_id=report.id) }}" data-report-label="LAPINSUS" data-attachment-count="{{ report.attachment_count }}" {% if report.status == 'draft' %}disabled title="Lengkapi dan simpan LAPINSUS terlebih dahulu"{% endif %}>Kirim WA</button><a href="{{ url_for('edit_lapinsus', report_id=report.id) }}">Edit</a><form method="post" action="{{ url_for('delete_lapinsus', report_id=report.id) }}" onsubmit="return confirm('Hapus LAPINSUS {{ report.report_number|e }}?')"><button type="submit">Hapus</button></form>{% endif %}</div></div>{% else %}<span class="report-readonly">Hanya lihat</span>{% endif %}</td>
     </tr>{% else %}<tr><td colspan="6" class="no-search-results">Tidak ada {{ report_type }} yang sesuai dengan pencarian “{{ search }}”.</td></tr>{% endfor %}</tbody>
   </table></div>
   {% if total_pages > 1 %}
@@ -44,6 +92,122 @@
 {% else %}
 <section class="empty-state"><div class="empty-icon">▤</div><h2>Belum ada laporan</h2><p>Mulai dengan membuat laporan {{ report_type }} pertama Anda.</p></section>
 {% endif %}
-{% if report_type == 'LAPINHAR' %}{% include '_inteliz_auth_modal.html' %}{% include '_whatsapp_send_modal.html' %}{% include '_lapinsus_convert_modal.html' %}{% endif %}
+{% if report_type == 'LAPINHAR' or report_type == 'LAPINSUS' %}{% include '_inteliz_auth_modal.html' %}{% endif %}
+{% if report_type == 'LAPINHAR' or report_type == 'LAPINSUS' %}{% include '_whatsapp_send_modal.html' %}{% endif %}
+{% if report_type == 'LAPINHAR' or report_type == 'LAPINSUS' %}{% include '_register_report_modal.html' %}{% endif %}
+{% if report_type == 'LAPINHAR' %}{% include '_lapinsus_convert_modal.html' %}{% endif %}
+{% if draft_choice %}
+<div class="draft-choice-modal">
+  {% set draft_list_endpoint = 'lapinhar' if report_type == 'LAPINHAR' else 'lapinsus' %}
+  {% set draft_create_endpoint = 'create_lapinhar' if report_type == 'LAPINHAR' else 'create_lapinsus' %}
+  {% set draft_edit_endpoint = 'edit_lapinhar' if report_type == 'LAPINHAR' else 'edit_lapinsus' %}
+  <a class="draft-choice-backdrop" href="{{ url_for(draft_list_endpoint) }}" aria-label="Tutup"></a>
+  <section class="draft-choice-dialog" role="dialog" aria-modal="true" aria-labelledby="draft-choice-title">
+    <a class="draft-choice-close" href="{{ url_for(draft_list_endpoint) }}" aria-label="Tutup">×</a>
+    <div class="draft-choice-icon">D</div>
+    <p class="section-kicker">DRAF DITEMUKAN</p>
+    <h2 id="draft-choice-title">Lanjutkan draft yang ada?</h2>
+    <p class="draft-choice-description">Anda masih memiliki {{ report_type }} yang belum selesai. Lanjutkan draft tersebut agar nomor surat tidak terlewat, atau buat laporan baru dengan nomor berikutnya.</p>
+    <div class="draft-choice-report"><span>Nomor Draft</span><strong>{{ draft_choice.report_number }}</strong><small>{{ draft_choice.title or 'Perihal belum diisi' }}</small></div>
+    <div class="draft-choice-actions"><a class="new" href="{{ url_for(draft_create_endpoint, new=1) }}">Buat Baru</a><a class="continue" href="{{ url_for(draft_edit_endpoint, report_id=draft_choice.id) }}">Lanjutkan Draf</a></div>
+  </section>
+</div>
+{% endif %}
 {% endblock %}
-{% block extra_scripts %}{% if report_type == 'LAPINHAR' %}<script src="{{ url_for('static', filename='js/inteliz-auth.js') }}"></script><script src="{{ url_for('static', filename='js/whatsapp-send.js') }}"></script><script src="{{ url_for('static', filename='js/lapinsus-convert.js') }}"></script>{% endif %}{% endblock %}
+{% block extra_scripts %}
+{% if report_type == 'LAPINHAR' or report_type == 'LAPINSUS' %}
+<script src="{{ url_for('static', filename='js/inteliz-auth.js') }}"></script>
+<script src="{{ url_for('static', filename='js/whatsapp-send.js') }}"></script>
+<script src="{{ url_for('static', filename='js/register-report.js', v='20260729-1') }}"></script>
+{% endif %}
+{% if report_type == 'LAPINHAR' or report_type == 'LAPINSUS' %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
+<script>
+(() => {
+  const canvas = document.getElementById("reportIssueChart");
+  if (!canvas || !window.Chart) return;
+  const chartData = JSON.parse(canvas.dataset.chart || "{}");
+  const labels = chartData.labels || [];
+  const totals = chartData.totals || [];
+  const groups = chartData.groups || [];
+
+  const issueLabelPlugin = {
+    id: "lapinharIssueLabels",
+    afterDatasetsDraw(chart) {
+      const { ctx } = chart;
+      const meta = chart.getDatasetMeta(0);
+      ctx.save();
+      ctx.fillStyle = "#172b3b";
+      ctx.font = "800 10px Manrope, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      meta.data.forEach((bar, index) => {
+        ctx.fillText(labels[index] || "", bar.x, bar.y - 7);
+      });
+      ctx.restore();
+    },
+    afterDraw(chart) {
+      const { ctx, chartArea } = chart;
+      const meta = chart.getDatasetMeta(0);
+      ctx.save();
+      ctx.fillStyle = "#405260";
+      ctx.font = "900 11px Manrope, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      groups.forEach((group) => {
+        const first = meta.data[group.start];
+        const last = meta.data[group.end];
+        if (!first || !last) return;
+        ctx.fillText(group.name, (first.x + last.x) / 2, chartArea.bottom + 14);
+      });
+      ctx.restore();
+    }
+  };
+
+  new Chart(canvas, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        data: totals,
+        backgroundColor: chartData.colors || "#14b8a6",
+        borderRadius: 7,
+        maxBarThickness: 34
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: { padding: { top: 24, bottom: 34, left: 4, right: 8 } },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => items?.[0]?.label || "",
+            label: (item) => `Jumlah: ${item.formattedValue}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          border: { color: "#8fa1ae", width: 2 },
+          ticks: { display: false }
+        },
+        y: {
+          beginAtZero: true,
+          ticks: { precision: 0, color: "#657784", font: { family: "Manrope", size: 10, weight: "800" } },
+          grid: { color: "#dce6eb" },
+          border: { color: "#8fa1ae", width: 2 }
+        }
+      }
+    },
+    plugins: [issueLabelPlugin]
+  });
+})();
+</script>
+{% endif %}
+{% if report_type == 'LAPINHAR' %}
+<script src="{{ url_for('static', filename='js/lapinsus-convert.js') }}"></script>
+{% endif %}
+{% endblock %}

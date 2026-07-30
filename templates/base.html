@@ -3,17 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#07111f">
-  <title>{% block title %}Intel Dashboard{% endblock %}</title>
+  <meta name="theme-color" content="#f4f7f9">
+  <title>{% block title %}IndraOne{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script>if(localStorage.getItem("indraone-theme")==="dark")document.documentElement.dataset.theme="dark";</script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260730-mahasiswa-role') }}">
   {% block extra_head %}{% endblock %}
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
   {% block content %}{% endblock %}
-  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js', v='20260730-indraone-responsive-dark') }}"></script>
   {% block extra_scripts %}{% endblock %}
 </body>
 </html>

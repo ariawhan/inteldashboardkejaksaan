@@ -1,0 +1,288 @@
+{% extends "app_layout.html" %}
+{% block title %}R.IN.5 - IndraOne{% endblock %}
+{% block page_title %}Register Intelijen {% endblock %}
+{% block app_content %}
+<section class="page-heading">
+  <div><p class="section-kicker">MODUL REGISTER</p><h1>Register Produk Intelijen R.IN.5</h1><p>Kelola daftar produk intelijen, nomor, tanggal, bidang, perihal, disposisi, dan keterangan.</p></div>
+  <div class="register-page-actions">
+    <button type="button" class="register-export-button" data-register-export-open><span>PDF</span><strong>Ekspor PDF</strong></button>
+    <a class="register-excel-button" href="{{ url_for('export_register_intelijen_rin5_excel', q=search, bidang=filter_bidang, month=filter_month, year=filter_year) }}"><span>XLS</span><strong>Ekspor Excel</strong></a>
+    <a class="primary-button" href="{{ url_for('create_register_intelijen_rin5') }}">+ Tambah Data</a>
+  </div>
+</section>
+
+<section class="register-overview-grid">
+  <section class="content-card register-notes-chart">
+    <div class="card-heading register-chart-heading">
+      <div><h2>Grafik Register</h2><span>Total masing-masing jenis produk intelijen {{ chart_month_name }} {{ current_year }}.</span></div>
+      <form method="get" class="register-chart-filter">
+        <input type="hidden" name="q" value="{{ search }}">
+        <input type="hidden" name="bidang" value="{{ filter_bidang }}">
+        <input type="hidden" name="month" value="{{ filter_month }}">
+        <input type="hidden" name="year" value="{{ filter_year }}">
+        <label>
+          <span>Filter Bulan</span>
+          <select name="chart_month" onchange="this.form.submit()">
+            <option value="all" {{ 'selected' if chart_month == 'all' else '' }}>Semua bulan</option>
+            {% for month_no in range(1, 13) %}
+            <option value="{{ month_no }}" {{ 'selected' if chart_month == month_no|string else '' }}>{{ month_names[month_no] }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </form>
+    </div>
+    <div class="register-bar-chart">
+      {% for item in product_chart_rows %}
+      <div class="register-bar-row">
+        <span title="{{ item.product_label }}">{{ item.product_label }}</span>
+        <div><i style="width: {{ ((item.total / max_product_total) * 100)|round(0, 'floor') if max_product_total else 0 }}%"></i></div>
+        <strong>{{ item.total }}</strong>
+      </div>
+      {% else %}
+      <p class="register-chart-empty">Belum ada data jenis produk pada {{ chart_month_name }} {{ current_year }}.</p>
+      {% endfor %}
+    </div>
+  </section>
+  <div class="lapinhar-summary register-summary register-summary-compact">
+    <article>
+      <span>Total Register Tahun {{ current_year }}</span>
+      <strong>{{ total_current_year }}</strong>
+      <small>Seluruh data R.IN.5 pada tahun {{ current_year }}</small>
+    </article>
+    <article class="pending-inteliz">
+      <span>Total Register Bulan {{ current_month_name }}</span>
+      <strong>{{ total_current_month }}</strong>
+      <small>Data R.IN.5 pada bulan {{ current_month_name }} {{ current_year }}</small>
+    </article>
+  </div>
+</section>
+
+<section class="content-card register-filter-card">
+  <div class="card-heading"><div><h2>Filter Data</h2><span>Cari berdasarkan jenis produk, nomor, perihal, disposisi, atau pembuat data.</span></div></div>
+  <form method="get" class="register-filter-form">
+    <label class="register-query-field">
+      <span>Pencarian</span>
+      <input type="search" name="q" value="{{ search }}" placeholder="Cari jenis produk, nomor, perihal, atau disposisi...">
+    </label>
+    <label>
+      <span>Subdit/Seksi/Subseksi</span>
+      <select name="bidang">
+        <option value="">Semua bidang</option>
+        {% for code, label in issue_code_labels.items() %}
+        <option value="{{ code }}" {{ 'selected' if filter_bidang == code else '' }}>{{ code }} - {{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>Bulan Produk</span>
+      <select name="month">
+        <option value="">Semua bulan</option>
+        {% for month_no in range(1, 13) %}
+        <option value="{{ month_no }}" {{ 'selected' if filter_month == month_no|string else '' }}>{{ month_names[month_no] }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>Tahun</span>
+      <select name="year">
+        <option value="">Semua tahun</option>
+        {% for item in years %}
+        <option value="{{ item }}" {{ 'selected' if filter_year == item|string else '' }}>{{ item }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="register-filter-actions">
+      <button type="submit" class="primary-button">Terapkan</button>
+      <a class="register-reset-button" href="{{ url_for('register_intelijen_rin5') }}">Reset</a>
+    </div>
+  </form>
+</section>
+
+<section class="content-card table-card">
+  <div class="card-heading register-table-heading">
+    <div><h2>Daftar R.IN.5</h2><span>{{ filtered_total }} data ditemukan</span></div>
+  </div>
+  <div class="table-wrap register-table-wrap">
+    <table class="register-table register-rin5-table">
+      <thead>
+        <tr>
+          <th>No</th>
+          <th>Nama Satker</th>
+          <th>Jenis Produk Intelijen</th>
+          <th>Nomor Produk Intelijen</th>
+          <th>Tanggal Produk Intelijen</th>
+          <th>Subdit/Seksi/Subseksi</th>
+          <th>Perihal</th>
+          <th>Disposisi Pimpinan</th>
+          <th>Keterangan</th>
+          <th>Aksi</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in entries %}
+        <tr>
+          <td class="register-col-no"><strong>{{ ((page - 1) * per_page) + loop.index }}</strong></td>
+          <td><div class="register-cell-main">{{ organization_name }}</div><small>Dibuat oleh {{ entry.creator_full_name }}</small></td>
+          <td><div class="register-cell-main">{{ entry.intelligence_product_type }}</div></td>
+          <td><span class="register-value-badge">{{ entry.intelligence_product_number }}</span></td>
+          <td><span class="register-date-badge">{{ entry.intelligence_product_date.strftime('%d/%m/%Y') if entry.intelligence_product_date else '-' }}</span></td>
+          <td class="register-col-field"><strong>{{ entry.field_code }}</strong><small>{{ issue_code_labels.get(entry.field_code, '-') }}</small></td>
+          <td><div class="register-long-text">{{ entry.subject }}</div></td>
+          <td><div class="register-long-text">{{ entry.leader_disposition or '-' }}</div></td>
+          <td><span class="register-remark-badge">{{ entry.remarks or '-' }}</span></td>
+          <td>
+            {% if session.role == 'admin' or entry.created_by == session.user_id %}
+            <div class="report-actions register-actions">
+              <a href="{{ url_for('edit_register_intelijen_rin5', entry_id=entry.id) }}">Edit</a>
+              <form method="post" action="{{ url_for('delete_register_intelijen_rin5', entry_id=entry.id) }}" onsubmit="return confirm('Hapus data R.IN.5 ini?')">
+                <button type="submit">Hapus</button>
+              </form>
+            </div>
+            {% else %}
+            <span class="report-readonly">Hanya lihat</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="no-search-results">Belum ada data R.IN.5.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if total_pages > 1 %}
+  <nav class="report-pagination" aria-label="Halaman daftar R.IN.5">
+    <span>Halaman {{ page }} dari {{ total_pages }}</span>
+    <div>
+      {% if page > 1 %}<a href="{{ url_for('register_intelijen_rin5', q=search, bidang=filter_bidang, month=filter_month, year=filter_year, page=page-1) }}">Sebelumnya</a>{% endif %}
+      {% for number in range(1, total_pages + 1) %}
+        {% if number == page %}
+        <strong>{{ number }}</strong>
+        {% elif number == 1 or number == total_pages or (number >= page-2 and number <= page+2) %}
+        <a href="{{ url_for('register_intelijen_rin5', q=search, bidang=filter_bidang, month=filter_month, year=filter_year, page=number) }}">{{ number }}</a>
+        {% elif number == 2 or number == total_pages-1 %}
+        <i>...</i>
+        {% endif %}
+      {% endfor %}
+      {% if page < total_pages %}<a href="{{ url_for('register_intelijen_rin5', q=search, bidang=filter_bidang, month=filter_month, year=filter_year, page=page+1) }}">Berikutnya</a>{% endif %}
+    </div>
+  </nav>
+  {% endif %}
+</section>
+
+<div class="register-export-modal" data-register-export-modal hidden>
+  <button type="button" class="register-export-backdrop" data-register-export-close aria-label="Tutup popup"></button>
+  <form class="register-export-dialog" method="get" action="{{ url_for('export_register_intelijen_rin5_pdf') }}">
+    <input type="hidden" name="q" value="{{ search }}">
+    <input type="hidden" name="bidang" value="{{ filter_bidang }}">
+    <button type="button" class="register-export-close" data-register-export-close aria-label="Tutup">x</button>
+    <span class="register-export-icon">PDF</span>
+    <h2>Ekspor Register R.IN.5</h2>
+    <p>Pilih bulan, tahun, dan tanda tangan untuk PDF Register Produk Intelijen.</p>
+    <div class="register-export-grid">
+      <label>
+        <span>Bulan</span>
+        <select name="month">
+          {% for month_no in range(1, 13) %}
+          <option value="{{ month_no }}" {{ 'selected' if month_no == current_month else '' }}>{{ month_names[month_no] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Tahun</span>
+        <select name="year">
+          {% for item in years %}
+          <option value="{{ item }}" {{ 'selected' if item == current_year else '' }}>{{ item }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="full">
+        <span>Tanggal TTD</span>
+        <input type="date" name="signature_date" value="{{ today }}">
+      </label>
+    </div>
+    <div class="register-export-checks">
+      <label>
+        <input type="checkbox" name="use_scan_signature" value="1">
+        <span>✓</span>
+        <strong>Pakai TTD scan</strong>
+      </label>
+      <label>
+        <input type="checkbox" name="use_digital_stamp" value="1">
+        <span>✓</span>
+        <strong>Pakai cap digital</strong>
+      </label>
+    </div>
+    <div class="register-export-acting">
+      <label class="register-export-acting-toggle">
+        <input type="checkbox" name="use_acting_kajari" value="1" data-acting-export-toggle="kajari">
+        <span>✓</span>
+        <strong>Plt/Plh Kajari</strong>
+      </label>
+      <div class="register-export-acting-fields" data-acting-export-fields="kajari" hidden>
+        <label><span>Pilih</span><select name="acting_kajari_type"><option value="plt">Plt</option><option value="plh">Plh</option></select></label>
+        <label><span>Nama</span><input type="text" name="acting_kajari_name" placeholder="Nama pejabat"></label>
+        <label><span>Jabatan</span><input type="text" name="acting_kajari_position" placeholder="Contoh: Jaksa Madya"></label>
+        <label><span>NIP</span><input type="text" name="acting_kajari_nip" placeholder="NIP pejabat"></label>
+      </div>
+      <label class="register-export-acting-toggle">
+        <input type="checkbox" name="use_acting_kasi" value="1" data-acting-export-toggle="kasi">
+        <span>✓</span>
+        <strong>Plt/Plh Kasi Intelijen</strong>
+      </label>
+      <div class="register-export-acting-fields" data-acting-export-fields="kasi" hidden>
+        <label><span>Pilih</span><select name="acting_kasi_type"><option value="plt">Plt</option><option value="plh">Plh</option></select></label>
+        <label><span>Nama</span><input type="text" name="acting_kasi_name" placeholder="Nama pejabat"></label>
+        <label><span>Jabatan</span><input type="text" name="acting_kasi_position" placeholder="Contoh: Jaksa Muda"></label>
+        <label><span>NIP</span><input type="text" name="acting_kasi_nip" placeholder="NIP pejabat"></label>
+      </div>
+    </div>
+    <div class="register-export-actions">
+      <button type="button" class="register-reset-button" data-register-export-close>Batal</button>
+      <button type="submit" class="primary-button">Download PDF</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(() => {
+  const modal = document.querySelector("[data-register-export-modal]");
+  const openButton = document.querySelector("[data-register-export-open]");
+  const closeButtons = document.querySelectorAll("[data-register-export-close]");
+  if (!modal || !openButton) return;
+
+  const openModal = () => {
+    modal.hidden = false;
+    document.body.classList.add("register-export-modal-open");
+    const firstSelect = modal.querySelector("select");
+    if (firstSelect) firstSelect.focus();
+  };
+
+  const closeModal = () => {
+    modal.hidden = true;
+    document.body.classList.remove("register-export-modal-open");
+    openButton.focus();
+  };
+
+  openButton.addEventListener("click", openModal);
+  closeButtons.forEach((button) => button.addEventListener("click", closeModal));
+  modal.querySelectorAll("[data-acting-export-toggle]").forEach((checkbox) => {
+    const key = checkbox.dataset.actingExportToggle;
+    const fields = modal.querySelector(`[data-acting-export-fields="${key}"]`);
+    if (!fields) return;
+    const update = () => {
+      fields.hidden = !checkbox.checked;
+      fields.querySelectorAll("input, select").forEach((field) => {
+        field.disabled = !checkbox.checked;
+      });
+    };
+    checkbox.addEventListener("change", update);
+    update();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !modal.hidden) closeModal();
+  });
+})();
+</script>
+{% endblock %}

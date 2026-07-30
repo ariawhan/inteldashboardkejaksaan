@@ -9,14 +9,16 @@ import shutil
 import threading
 import time
 import zipfile
-from datetime import date
+from datetime import date, datetime
 from functools import wraps
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote, urlparse
+from xml.sax.saxutils import escape as xml_escape
 
 import pymysql
 import requests
+import click
 from bs4 import BeautifulSoup, NavigableString, Tag
 from cryptography.fernet import Fernet, InvalidToken
 from dotenv import load_dotenv
@@ -26,16 +28,27 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Cm, Pt
 from flask import Flask, abort, flash, g, jsonify, redirect, render_template, request, send_file, send_from_directory, session, url_for
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import cm
+from reportlab.lib.units import cm, inch
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas as reportlab_canvas
-from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-from PIL import Image as PILImage
+from reportlab.platypus import (
+    Image,
+    KeepTogether,
+    LongTable,
+    PageBreak,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
+from PIL import Image as PILImage, ImageOps
 from playwright.sync_api import sync_playwright
 from xml.sax.saxutils import escape
+from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -48,7 +61,7 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     PERMANENT_SESSION_LIFETIME=60 * 60 * 12,
-    MAX_CONTENT_LENGTH=20 * 1024 * 1024,
+    MAX_CONTENT_LENGTH=80 * 1024 * 1024,
 )
 
 DB_CONFIG = {
@@ -63,14 +76,46 @@ DB_NAME = os.getenv("DB_NAME", "intel_dashboard")
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 STATIC_IMG_DIR = Path(__file__).resolve().parent / "static" / "img"
 UPLOAD_DIR = Path(__file__).resolve().parent / "uploads" / "reports"
+SIGNATORY_UPLOAD_DIR = Path(__file__).resolve().parent / "uploads" / "signatories"
+ORGANIZATION_UPLOAD_DIR = Path(__file__).resolve().parent / "uploads" / "organization"
+USER_AVATAR_UPLOAD_DIR = Path(__file__).resolve().parent / "uploads" / "users"
+MAX_ATTACHMENT_SIZE_BYTES = 100 * 1024
+MAX_ATTACHMENT_DIMENSION = 2200
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 ISSUE_CODES = {"Ds.1", "Ds.2", "Ds.3", "Dip.1", "Dip.2", "Dip.3", "Dip.4",
                "Dsb.1", "Dsb.2", "Dsb.3", "Dsb.4", "Dek.1", "Dek.2", "Dek.3", "Dek.4",
                "Dpp.1", "Dpp.2", "Dpp.3", "Dpp.4", "Dti.1", "Dti.2", "Dti.3", "Dti.4"}
+ISSUE_CODE_LABELS = {
+    "Ds.1": "Penyusunan Program, Laporan dan Penilaian",
+    "Ds.2": "Tata Usaha",
+    "Ds.3": "Keuangan",
+    "Dip.1": "Ideologi",
+    "Dip.2": "Politik",
+    "Dip.3": "Pertahanan dan Keamanan",
+    "Dip.4": "Cegah Tangkal, Pengawasan Orang Asing, Pengamanan Sumber Daya Organisasi Kejaksaan dan Pengamanan Penanganan Perkara",
+    "Dsb.1": "Peredaran Barang Cetakan dan Media Komunikasi",
+    "Dsb.2": "Aliran Kepercayaan Masyarakat dan Aliran Keagamaan serta Pencegahan Penyalahgunaan dan Penodaan Agama",
+    "Dsb.3": "Budaya dan Kemasyarakatan",
+    "Dsb.4": "Sosial, Ketertiban dan Ketentraman Umum, Pembinaan Masyarakat Taat Hukum (Binmatkum)",
+    "Dek.1": "Keuangan dan Kekayaan Negara",
+    "Dek.2": "Investasi dan Penerimaan Negara",
+    "Dek.3": "Perdagangan, Perindustrian dan Ketenagakerjaan",
+    "Dek.4": "Sumber Daya Alam dan Agraria atau Tata Ruang",
+    "Dpp.1": "Pengamanan Pembangunan Infrastruktur Transportasi dan Telekomunikasi",
+    "Dpp.2": "Pengamanan Pembangunan Infrastruktur Pengairan, Pertanian dan Kelautan",
+    "Dpp.3": "Pengamanan Pembangunan Infrastruktur Energi, Sumber Daya Alam dan Ilmu Pengetahuan dan Teknologi",
+    "Dpp.4": "Pengamanan Pembangunan Infrastruktur Kawasan dan Sektor Strategis Lainnya",
+    "Dti.1": "Produksi Intelijen",
+    "Dti.2": "Pemantauan",
+    "Dti.3": "Pengamanan Informasi",
+    "Dti.4": "Pengembangan Sumber Daya Teknologi Informasi",
+}
+REGISTER_INFORMATION_VALUES = [f"{letter}{number}" for letter in "ABCDEF" for number in range(1, 7)]
 CHROME_EXECUTABLE = Path(os.getenv("CHROME_EXECUTABLE", r"C:\Program Files\Google\Chrome\Application\chrome.exe"))
 INTELIZ_LOGIN_URL = "https://inteliz.kejaksaan.go.id/login"
 INTELIZ_2FA_PATH = "/2fa/challenge"
 INTELIZ_LAPINHAR_CREATE_URL = "https://inteliz.kejaksaan.go.id/lapinhar/create"
+INTELIZ_LAPINSUS_CREATE_URL = "https://inteliz.kejaksaan.go.id/lapinsus/create"
 INTELIZ_AUTH_SESSIONS = {}
 INTELIZ_AUTH_LOCK = threading.Lock()
 SIPEDE_LOGIN_URL = "https://sipede.kejaksaan.go.id/login"
@@ -82,6 +127,18 @@ SIPEDE_AUTH_LOCK = threading.Lock()
 
 class IntelizAuthenticationRequired(RuntimeError):
     pass
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def handle_request_too_large(_error):
+    message = (
+        "Ukuran upload terlalu besar. Silakan kurangi jumlah foto sekali upload "
+        "atau kecilkan ukuran file sebelum dikirim."
+    )
+    if request.path.startswith("/lapinhar") or request.path.startswith("/lapinsus"):
+        flash(message, "error")
+        return redirect(request.url)
+    return jsonify(message=message), 413
 
 PDF_FONT_NAME = "Times-Roman"
 PDF_FONT_BOLD = "Times-Bold"
@@ -155,6 +212,61 @@ def migrate_command():
     print(f"Migration database '{DB_NAME}' selesai.")
 
 
+def existing_max_document_number(document_type, document_year):
+    table_name = "lapinhar_reports" if document_type == "lapinhar" else "lapinsus_reports"
+    prefix = "R-LIH" if document_type == "lapinhar" else "R-LIK"
+    pattern = re.compile(rf"^{prefix}-(\d+)[A-Z]*/.+/{document_year}$", re.IGNORECASE)
+    max_number = 0
+    connection = pymysql.connect(database=DB_NAME, **DB_CONFIG)
+    try:
+        with connection.cursor() as cursor:
+            like_pattern = f"{prefix}-%/{document_year}".replace("\\/", "/")
+            cursor.execute(
+                f"SELECT report_number FROM {table_name} "
+                "WHERE report_number LIKE %s",
+                (like_pattern,),
+            )
+            for row in cursor.fetchall():
+                match = pattern.match(row.get("report_number") or "")
+                if match:
+                    max_number = max(max_number, int(match.group(1)))
+    finally:
+        connection.close()
+    return max_number
+
+
+@app.cli.command("set-last-number")
+@click.argument("document_type", type=click.Choice(["lapinhar", "lapinsus"], case_sensitive=False))
+@click.argument("last_number", type=int)
+@click.option("--year", "document_year", default=lambda: date.today().year, show_default="tahun berjalan", type=int)
+def set_last_number_command(document_type, last_number, document_year):
+    """Set nomor surat terakhir manual. Sistem akan memakai nomor berikutnya."""
+    initialize_database()
+    document_type = document_type.lower()
+    existing_max = existing_max_document_number(document_type, document_year)
+    requested_next = last_number + 1
+    safe_next = max(requested_next, existing_max + 1)
+    connection = pymysql.connect(database=DB_NAME, autocommit=True, **DB_CONFIG)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """INSERT INTO document_counters (document_type, document_year, next_number)
+                   VALUES (%s, %s, %s)
+                   ON DUPLICATE KEY UPDATE next_number = VALUES(next_number)""",
+                (document_type, document_year, safe_next),
+            )
+    finally:
+        connection.close()
+    prefix = "R-LIH" if document_type == "lapinhar" else "R-LIK"
+    if safe_next != requested_next:
+        print(
+            f"Nomor {prefix} tahun {document_year} diset ke {safe_next}. "
+            f"Database sudah punya nomor sampai {existing_max}, jadi angka dibuat aman."
+        )
+    else:
+        print(f"Nomor {prefix} tahun {document_year} berhasil diset. Nomor berikutnya: {safe_next}.")
+
+
 def get_db():
     if "db" not in g:
         g.db = pymysql.connect(database=DB_NAME, autocommit=True, **DB_CONFIG)
@@ -200,6 +312,32 @@ def admin_required(view):
     return wrapped_view
 
 
+MAHASISWA_ALLOWED_ENDPOINTS = {
+    "static", "logout", "lapinhar", "lapinsus",
+    "create_lapinhar", "edit_lapinhar", "delete_lapinhar",
+    "create_lapinsus", "edit_lapinsus", "delete_lapinsus",
+    "check_lapinhar_number", "reload_lapinhar_number",
+    "check_lapinsus_number", "reload_lapinsus_number",
+    "reserve_backdated_number_endpoint", "cancel_backdated_number_endpoint",
+    "lapinhar_attachment_file", "lapinsus_attachment_file",
+    "export_lapinhar_preview_pdf", "user_avatar",
+    "signatory_signature_file", "organization_digital_stamp_file",
+}
+
+
+@app.before_request
+def restrict_mahasiswa_access():
+    if session.get("role") != "mahasiswa":
+        return None
+    endpoint = request.endpoint
+    if endpoint in MAHASISWA_ALLOWED_ENDPOINTS:
+        return None
+    if endpoint == "dashboard":
+        return redirect(url_for("lapinhar"))
+    flash("Akun mahasiswa hanya dapat mengakses dan mengelola laporan milik sendiri.", "error")
+    return redirect(url_for("lapinhar"))
+
+
 @app.route("/", methods=["GET", "POST"])
 def login():
     if session.get("user_id"):
@@ -216,26 +354,1733 @@ def login():
             session.permanent = request.form.get("remember") == "on"
             session.update(
                 user_id=user["id"], full_name=user["full_name"],
-                username=user["username"], role=user["role"]
+                username=user["username"], role=user["role"],
+                profile_photo=user.get("profile_photo")
             )
-            return redirect(url_for("dashboard"))
+            return redirect(url_for("lapinhar") if user["role"] == "mahasiswa" else url_for("dashboard"))
     return render_template("login.html")
 
 
 @app.route("/dashboard")
 @login_required
 def dashboard():
+    if session.get("role") == "mahasiswa":
+        return redirect(url_for("lapinhar"))
     report_filter = "" if session["role"] == "admin" else " WHERE created_by = %s"
     params = () if session["role"] == "admin" else (session["user_id"],)
     rows = fetch_all(
-        "SELECT report_type, COUNT(*) total, SUM(status = 'draft') draft "
+        "SELECT report_type, COUNT(*) total, SUM(status = 'draft') draft, "
+        "SUM(status <> 'draft' AND NOT EXISTS("
+        "SELECT 1 FROM register_intelijen_entries register_entries "
+        "WHERE register_entries.source_report_type=reports.report_type "
+        "AND register_entries.source_report_id=reports.id"
+        ")) register_belum "
         f"FROM reports{report_filter} GROUP BY report_type", params
     )
-    counts = {"lapinhar": {"total": 0, "draft": 0}, "lapinsus": {"total": 0, "draft": 0}}
+    counts = {
+        "lapinhar": {"total": 0, "draft": 0, "register_belum": 0},
+        "lapinsus": {"total": 0, "draft": 0, "register_belum": 0},
+    }
     for row in rows:
-        counts[row["report_type"]] = {"total": row["total"], "draft": int(row["draft"] or 0)}
+        counts[row["report_type"]] = {
+            "total": row["total"],
+            "draft": int(row["draft"] or 0),
+            "register_belum": int(row["register_belum"] or 0),
+        }
     user_count = fetch_one("SELECT COUNT(*) total FROM users")["total"] if session["role"] == "admin" else None
     return render_template("dashboard.html", counts=counts, user_count=user_count, active="dashboard")
+
+
+MONTH_NAMES_ID = [
+    "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+    "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+]
+
+
+def format_indonesian_date(value):
+    if not value:
+        return "-"
+    if isinstance(value, datetime):
+        value = value.date()
+    return f"{value.day} {MONTH_NAMES_ID[value.month]} {value.year}"
+
+
+def issue_code_label(code):
+    return ISSUE_CODE_LABELS.get(code or "", code or "-")
+
+
+def format_time_value(value):
+    if not value:
+        return "-"
+    if hasattr(value, "strftime"):
+        return value.strftime("%H.%M")
+    if hasattr(value, "total_seconds"):
+        total_seconds = int(value.total_seconds())
+        hours = (total_seconds // 3600) % 24
+        minutes = (total_seconds % 3600) // 60
+        return f"{hours:02d}.{minutes:02d}"
+    return str(value)
+
+
+def save_user_profile_photo(uploaded_file, old_filename=None):
+    if not uploaded_file or not uploaded_file.filename:
+        return old_filename
+    extension = Path(secure_filename(uploaded_file.filename)).suffix.lower()
+    if extension not in {".png", ".jpg", ".jpeg", ".webp"}:
+        raise ValueError("Format foto harus PNG, JPG, JPEG, atau WEBP.")
+    USER_AVATAR_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    filename = f"avatar_{uuid.uuid4().hex[:16]}.jpg"
+    with PILImage.open(uploaded_file) as image:
+        image = ImageOps.exif_transpose(image).convert("RGB")
+        image.thumbnail((512, 512), PILImage.LANCZOS)
+        image.save(USER_AVATAR_UPLOAD_DIR / filename, "JPEG", quality=88, optimize=True)
+    if old_filename and old_filename != filename:
+        old_path = (USER_AVATAR_UPLOAD_DIR / old_filename).resolve()
+        try:
+            old_path.relative_to(USER_AVATAR_UPLOAD_DIR.resolve())
+            if old_path.is_file():
+                old_path.unlink()
+        except ValueError:
+            pass
+    return filename
+
+
+def excel_column_name(index):
+    name = ""
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        name = chr(65 + remainder) + name
+    return name
+
+
+def make_xlsx(headers, rows, sheet_name="Sheet1"):
+    def cell_xml(row_number, col_number, value, style_id=0):
+        cell_ref = f"{excel_column_name(col_number)}{row_number}"
+        text = "" if value is None else str(value)
+        style_attr = f' s="{style_id}"' if style_id else ""
+        return (
+            f'<c r="{cell_ref}" t="inlineStr"{style_attr}>'
+            f"<is><t>{xml_escape(text)}</t></is></c>"
+        )
+
+    sheet_rows = []
+    sheet_rows.append(
+        '<row r="1">' + "".join(
+            cell_xml(1, index, header, 1) for index, header in enumerate(headers, 1)
+        ) + "</row>"
+    )
+    for row_index, row in enumerate(rows, 2):
+        sheet_rows.append(
+            f'<row r="{row_index}">' + "".join(
+                cell_xml(row_index, col_index, value)
+                for col_index, value in enumerate(row, 1)
+            ) + "</row>"
+        )
+
+    column_widths = "".join(
+        f'<col min="{index}" max="{index}" width="{width}" customWidth="1"/>'
+        for index, width in enumerate([7, 28, 26, 28, 18, 35, 42, 42, 20], 1)
+    )
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        f"<cols>{column_widths}</cols><sheetData>{''.join(sheet_rows)}</sheetData></worksheet>"
+    )
+    workbook_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        f'<sheets><sheet name="{xml_escape(sheet_name[:31])}" sheetId="1" r:id="rId1"/></sheets></workbook>'
+    )
+    styles_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font>'
+        '<font><b/><sz val="11"/><name val="Calibri"/></font></fonts>'
+        '<fills count="2"><fill><patternFill patternType="none"/></fill>'
+        '<fill><patternFill patternType="solid"><fgColor rgb="FFE8F6F5"/>'
+        '<bgColor indexed="64"/></patternFill></fill></fills>'
+        '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+        '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+        '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+        '<xf numFmtId="0" fontId="1" fillId="1" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs>'
+        '</styleSheet>'
+    )
+
+    output = BytesIO()
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+            '</Types>'
+        ))
+        archive.writestr("_rels/.rels", (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            '</Relationships>'
+        ))
+        archive.writestr("xl/workbook.xml", workbook_xml)
+        archive.writestr("xl/_rels/workbook.xml.rels", (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+            '</Relationships>'
+        ))
+        archive.writestr("xl/styles.xml", styles_xml)
+        archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+    output.seek(0)
+    return output
+
+
+def register_intelijen_form_data():
+    organization = fetch_one("SELECT * FROM organization_settings WHERE id=1") or {}
+    form = request.form
+    report_date = (form.get("report_date") or date.today().isoformat()).strip()
+    field_code = (form.get("field_code") or "").strip()
+    time_value = (form.get("received_time") or "").strip()
+    default_org_name = (organization.get("organization_name") or "Kejaksaan Negeri Buleleng").strip()
+    source_name = (form.get("source_name") or default_org_name).strip()
+    info_value = (form.get("information_value") or "A1").strip().upper()
+    notes = (form.get("notes") or "").strip()
+    remarks = (form.get("remarks") or "Arsip").strip() or "Arsip"
+    data = {
+        "report_date": report_date,
+        "field_code": field_code if field_code in ISSUE_CODES else "",
+        "received_time": time_value,
+        "source_name": source_name,
+        "information_value": info_value if info_value in REGISTER_INFORMATION_VALUES else "A1",
+        "information_description": (form.get("information_description") or "").strip(),
+        "notes": notes,
+        "disposition": (form.get("disposition") or "").strip(),
+        "follow_up": (form.get("follow_up") or "").strip(),
+        "remarks": remarks,
+        "satker_name": default_org_name,
+    }
+    return data
+
+
+@app.route("/register-intelijen")
+@login_required
+def register_intelijen():
+    params = []
+    conditions = []
+    search = request.args.get("q", "").strip()[:150]
+    bidang = request.args.get("bidang", "").strip()
+    month = request.args.get("month", "").strip()
+    year = request.args.get("year", "").strip()
+    chart_month = request.args.get("chart_month", "").strip()
+    try:
+        page = max(1, int(request.args.get("page", "1")))
+    except ValueError:
+        page = 1
+    per_page = 10
+    if search:
+        search_value = f"%{search}%"
+        conditions.append(
+            """(entries.field_code LIKE %s OR entries.source_name LIKE %s
+                OR entries.information_value LIKE %s
+                OR entries.information_description LIKE %s OR entries.notes LIKE %s
+                OR entries.disposition LIKE %s OR entries.follow_up LIKE %s
+                OR entries.remarks LIKE %s OR users.full_name LIKE %s)"""
+        )
+        params.extend([search_value] * 9)
+    if bidang in ISSUE_CODES:
+        conditions.append("entries.field_code=%s")
+        params.append(bidang)
+    if month.isdigit() and 1 <= int(month) <= 12:
+        conditions.append("MONTH(entries.report_date)=%s")
+        params.append(int(month))
+    if year.isdigit():
+        conditions.append("YEAR(entries.report_date)=%s")
+        params.append(int(year))
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    filtered_total = fetch_one(
+        f"""SELECT COUNT(*) AS total
+            FROM register_intelijen_entries entries
+            JOIN users ON users.id=entries.created_by
+            {where_clause}""",
+        tuple(params),
+    )["total"]
+    total_pages = max(1, (int(filtered_total or 0) + per_page - 1) // per_page)
+    page = min(page, total_pages)
+    offset = (page - 1) * per_page
+    rows = fetch_all(
+        f"""SELECT entries.*, users.full_name AS creator_full_name
+            FROM register_intelijen_entries entries
+            JOIN users ON users.id=entries.created_by
+            {where_clause}
+            ORDER BY entries.report_date DESC, entries.received_time DESC, entries.id DESC
+            LIMIT %s OFFSET %s""",
+        tuple(params + [per_page, offset]),
+    )
+    for row in rows:
+        row["received_time_text"] = format_time_value(row.get("received_time"))
+    total = fetch_one("SELECT COUNT(*) AS total FROM register_intelijen_entries")["total"]
+    current_year = date.today().year
+    current_month = date.today().month
+    total_current_year = fetch_one(
+        "SELECT COUNT(*) AS total FROM register_intelijen_entries WHERE YEAR(report_date)=%s",
+        (current_year,),
+    )["total"]
+    total_current_month = fetch_one(
+        """SELECT COUNT(*) AS total FROM register_intelijen_entries
+           WHERE YEAR(report_date)=%s AND MONTH(report_date)=%s""",
+        (current_year, current_month),
+    )["total"]
+    chart_month_number = 0 if chart_month in {"", "all"} else (
+        int(chart_month) if chart_month.isdigit() and 1 <= int(chart_month) <= 12 else 0
+    )
+    chart_conditions = ["YEAR(report_date)=%s"]
+    chart_params = [current_year]
+    if chart_month_number:
+        chart_conditions.append("MONTH(report_date)=%s")
+        chart_params.append(chart_month_number)
+    chart_where = " AND ".join(chart_conditions)
+    notes_chart_rows = fetch_all(
+        """SELECT COALESCE(NULLIF(TRIM(notes), ''), 'Tanpa Catatan') AS note_label,
+                  COUNT(*) AS total
+           FROM register_intelijen_entries
+           WHERE """ + chart_where + """
+           GROUP BY note_label
+           ORDER BY total DESC, note_label ASC
+           LIMIT 10""",
+        tuple(chart_params),
+    )
+    max_note_total = max([int(row["total"] or 0) for row in notes_chart_rows] or [0])
+    years = fetch_all(
+        """SELECT DISTINCT YEAR(report_date) AS report_year
+           FROM register_intelijen_entries
+           WHERE report_date IS NOT NULL
+           ORDER BY report_year DESC"""
+    )
+    organization_name = (fetch_one("SELECT organization_name FROM organization_settings WHERE id=1") or {}).get("organization_name") or "Kejaksaan Negeri Buleleng"
+    return render_template(
+        "register_intelijen_list.html",
+        active="register_intelijen",
+        register_type="R.IN.3",
+        entries=rows,
+        total_entries=int(total or 0),
+        filtered_total=int(filtered_total or 0),
+        search=search,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+        filter_bidang=bidang,
+        filter_month=month,
+        filter_year=year,
+        current_month=date.today().month,
+        current_year=date.today().year,
+        today=date.today().isoformat(),
+        current_month_name=MONTH_NAMES_ID[current_month],
+        chart_month="all" if chart_month_number == 0 else str(chart_month_number),
+        chart_month_name=MONTH_NAMES_ID[chart_month_number] if chart_month_number else "Semua Bulan",
+        total_current_year=int(total_current_year or 0),
+        total_current_month=int(total_current_month or 0),
+        notes_chart_rows=notes_chart_rows,
+        max_note_total=max_note_total,
+        month_names=MONTH_NAMES_ID,
+        issue_code_labels=ISSUE_CODE_LABELS,
+        years=sorted(
+            {int(row["report_year"]) for row in years if row["report_year"]} | {date.today().year},
+            reverse=True,
+        ),
+        organization_name=organization_name,
+    )
+
+
+@app.route("/register-intelijen/create", methods=["GET", "POST"])
+@login_required
+def create_register_intelijen():
+    organization = fetch_one("SELECT * FROM organization_settings WHERE id=1") or {}
+    if request.method == "POST":
+        data = register_intelijen_form_data()
+        if not data["field_code"] or not data["information_description"]:
+            flash("Bidang dan uraian informasi wajib diisi.", "error")
+        else:
+            with get_db().cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO register_intelijen_entries
+                    (register_code, report_date, field_code, received_time, source_name,
+                     information_value, information_description, notes, disposition,
+                     follow_up, remarks, created_by)
+                    VALUES ('R.IN.3', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (
+                        data["report_date"], data["field_code"], data["received_time"] or None,
+                        data["source_name"], data["information_value"], data["information_description"],
+                        data["notes"], data["disposition"], data["follow_up"], data["remarks"],
+                        session["user_id"],
+                    ),
+                )
+            flash("Data Register Intelijen berhasil disimpan.", "success")
+            return redirect(url_for("register_intelijen"))
+    else:
+        data = {
+            "report_date": date.today().isoformat(),
+            "field_code": "",
+            "received_time": "",
+            "source_name": organization.get("organization_name") or "Kejaksaan Negeri Buleleng",
+            "information_value": "A1",
+            "information_description": "",
+            "notes": "",
+            "disposition": "",
+            "follow_up": "",
+            "remarks": "Arsip",
+            "satker_name": organization.get("organization_name") or "Kejaksaan Negeri Buleleng",
+        }
+    return render_template(
+        "register_intelijen_form.html",
+        active="register_intelijen",
+        register_type="R.IN.3",
+        form_title="Buat Register Intelijen",
+        form_description="Input data R.IN.3 Register Kerja Intelijen.",
+        data=data,
+        issue_code_labels=ISSUE_CODE_LABELS,
+        information_values=REGISTER_INFORMATION_VALUES,
+        entry=None,
+    )
+
+
+@app.route("/register-intelijen/<int:entry_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_register_intelijen(entry_id):
+    entry = fetch_one("SELECT * FROM register_intelijen_entries WHERE id=%s", (entry_id,))
+    if not entry:
+        flash("Data register tidak ditemukan.", "error")
+        return redirect(url_for("register_intelijen"))
+    if session.get("role") != "admin" and entry["created_by"] != session["user_id"]:
+        flash("Anda tidak dapat mengubah data register ini.", "error")
+        return redirect(url_for("register_intelijen"))
+    if request.method == "POST":
+        data = register_intelijen_form_data()
+        if not data["field_code"] or not data["information_description"]:
+            flash("Bidang dan uraian informasi wajib diisi.", "error")
+        else:
+            with get_db().cursor() as cursor:
+                cursor.execute(
+                    """UPDATE register_intelijen_entries
+                       SET report_date=%s, field_code=%s, received_time=%s, source_name=%s,
+                           information_value=%s, information_description=%s, notes=%s,
+                           disposition=%s, follow_up=%s, remarks=%s
+                       WHERE id=%s""",
+                    (
+                        data["report_date"], data["field_code"], data["received_time"] or None,
+                        data["source_name"], data["information_value"], data["information_description"],
+                        data["notes"], data["disposition"], data["follow_up"], data["remarks"], entry_id,
+                    ),
+                )
+            flash("Data Register Intelijen berhasil diperbarui.", "success")
+            return redirect(url_for("register_intelijen"))
+    else:
+        data = {
+            "report_date": entry["report_date"].isoformat() if entry.get("report_date") else date.today().isoformat(),
+            "field_code": entry.get("field_code") or "",
+            "received_time": format_time_value(entry.get("received_time")).replace(".", ":") if entry.get("received_time") else "",
+            "source_name": entry.get("source_name") or "",
+            "information_value": entry.get("information_value") or "A1",
+            "information_description": entry.get("information_description") or "",
+            "notes": entry.get("notes") or "",
+            "disposition": entry.get("disposition") or "",
+            "follow_up": entry.get("follow_up") or "",
+            "remarks": entry.get("remarks") or "Arsip",
+            "satker_name": (fetch_one("SELECT organization_name FROM organization_settings WHERE id=1") or {}).get("organization_name") or "Kejaksaan Negeri Buleleng",
+        }
+    return render_template(
+        "register_intelijen_form.html",
+        active="register_intelijen",
+        register_type="R.IN.3",
+        form_title="Edit Register Intelijen",
+        form_description="Perbarui data R.IN.3 Register Kerja Intelijen.",
+        data=data,
+        issue_code_labels=ISSUE_CODE_LABELS,
+        information_values=REGISTER_INFORMATION_VALUES,
+        entry=entry,
+    )
+
+
+@app.post("/register-intelijen/<int:entry_id>/delete")
+@login_required
+def delete_register_intelijen(entry_id):
+    entry = fetch_one("SELECT id,created_by FROM register_intelijen_entries WHERE id=%s", (entry_id,))
+    if not entry:
+        flash("Data register tidak ditemukan.", "error")
+    elif session.get("role") != "admin" and entry["created_by"] != session["user_id"]:
+        flash("Anda tidak dapat menghapus data register ini.", "error")
+    else:
+        with get_db().cursor() as cursor:
+            cursor.execute("DELETE FROM register_intelijen_entries WHERE id=%s", (entry_id,))
+        flash("Data Register Intelijen berhasil dihapus.", "success")
+    return redirect(url_for("register_intelijen"))
+
+
+def register_intelijen_rin5_form_data():
+    organization = fetch_one("SELECT organization_name FROM organization_settings WHERE id=1") or {}
+    form = request.form
+    product_date = (form.get("intelligence_product_date") or date.today().isoformat()).strip()
+    field_code = (form.get("field_code") or "").strip()
+    return {
+        "satker_name": organization.get("organization_name") or "Kejaksaan Negeri Buleleng",
+        "intelligence_product_type": (form.get("intelligence_product_type") or "").strip(),
+        "intelligence_product_number": (form.get("intelligence_product_number") or "").strip(),
+        "intelligence_product_date": product_date,
+        "field_code": field_code if field_code in ISSUE_CODES else "",
+        "subject": (form.get("subject") or "").strip(),
+        "leader_disposition": (form.get("leader_disposition") or "").strip(),
+        "remarks": (form.get("remarks") or "").strip(),
+    }
+
+
+@app.route("/register-intelijen/rin5")
+@login_required
+def register_intelijen_rin5():
+    params = []
+    conditions = []
+    search = request.args.get("q", "").strip()[:150]
+    bidang = request.args.get("bidang", "").strip()
+    month = request.args.get("month", "").strip()
+    year = request.args.get("year", "").strip()
+    try:
+        page = max(1, int(request.args.get("page", "1")))
+    except ValueError:
+        page = 1
+    per_page = 10
+    if search:
+        search_value = f"%{search}%"
+        conditions.append(
+            """(entries.intelligence_product_type LIKE %s
+                OR entries.intelligence_product_number LIKE %s
+                OR entries.field_code LIKE %s OR entries.subject LIKE %s
+                OR entries.leader_disposition LIKE %s OR entries.remarks LIKE %s
+                OR users.full_name LIKE %s)"""
+        )
+        params.extend([search_value] * 7)
+    if bidang in ISSUE_CODES:
+        conditions.append("entries.field_code=%s")
+        params.append(bidang)
+    if month.isdigit() and 1 <= int(month) <= 12:
+        conditions.append("MONTH(entries.intelligence_product_date)=%s")
+        params.append(int(month))
+    if year.isdigit():
+        conditions.append("YEAR(entries.intelligence_product_date)=%s")
+        params.append(int(year))
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    current_year = date.today().year
+    current_month = date.today().month
+    chart_month = request.args.get("chart_month", "all").strip() or "all"
+    chart_conditions = ["YEAR(intelligence_product_date)=%s"]
+    chart_params = [current_year]
+    if chart_month.isdigit() and 1 <= int(chart_month) <= 12:
+        chart_conditions.append("MONTH(intelligence_product_date)=%s")
+        chart_params.append(int(chart_month))
+        chart_month_name = MONTH_NAMES_ID[int(chart_month)]
+    else:
+        chart_month = "all"
+        chart_month_name = "Semua bulan"
+    product_chart_rows = fetch_all(
+        f"""SELECT COALESCE(NULLIF(TRIM(intelligence_product_type), ''), 'Tanpa Jenis') AS product_label,
+                   COUNT(*) AS total
+            FROM register_intelijen_rin5_entries
+            WHERE {' AND '.join(chart_conditions)}
+            GROUP BY product_label
+            ORDER BY total DESC, product_label ASC
+            LIMIT 12""",
+        tuple(chart_params),
+    )
+    max_product_total = max([int(row["total"] or 0) for row in product_chart_rows] or [0])
+    total_current_year = int(fetch_one(
+        """SELECT COUNT(*) AS total FROM register_intelijen_rin5_entries
+           WHERE YEAR(intelligence_product_date)=%s""",
+        (current_year,),
+    )["total"] or 0)
+    total_current_month = int(fetch_one(
+        """SELECT COUNT(*) AS total FROM register_intelijen_rin5_entries
+           WHERE YEAR(intelligence_product_date)=%s AND MONTH(intelligence_product_date)=%s""",
+        (current_year, current_month),
+    )["total"] or 0)
+    filtered_total = int(fetch_one(
+        f"""SELECT COUNT(*) AS total
+            FROM register_intelijen_rin5_entries entries
+            JOIN users ON users.id=entries.created_by
+            {where_clause}""",
+        tuple(params),
+    )["total"] or 0)
+    total_pages = max(1, (filtered_total + per_page - 1) // per_page)
+    page = min(page, total_pages)
+    rows = fetch_all(
+        f"""SELECT entries.*, users.full_name AS creator_full_name
+            FROM register_intelijen_rin5_entries entries
+            JOIN users ON users.id=entries.created_by
+            {where_clause}
+            ORDER BY entries.intelligence_product_date DESC, entries.id DESC
+            LIMIT %s OFFSET %s""",
+        tuple(params + [per_page, (page - 1) * per_page]),
+    )
+    total = fetch_one("SELECT COUNT(*) AS total FROM register_intelijen_rin5_entries")["total"]
+    years = fetch_all(
+        """SELECT DISTINCT YEAR(intelligence_product_date) AS report_year
+           FROM register_intelijen_rin5_entries
+           WHERE intelligence_product_date IS NOT NULL
+           ORDER BY report_year DESC"""
+    )
+    organization_name = (fetch_one("SELECT organization_name FROM organization_settings WHERE id=1") or {}).get("organization_name") or "Kejaksaan Negeri Buleleng"
+    return render_template(
+        "register_intelijen_rin5_list.html",
+        active="register_intelijen_rin5",
+        entries=rows,
+        total_entries=int(total or 0),
+        filtered_total=filtered_total,
+        search=search,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+        filter_bidang=bidang,
+        filter_month=month,
+        filter_year=year,
+        month_names=MONTH_NAMES_ID,
+        issue_code_labels=ISSUE_CODE_LABELS,
+        organization_name=organization_name,
+        current_year=current_year,
+        current_month=current_month,
+        current_month_name=MONTH_NAMES_ID[current_month],
+        chart_month=chart_month,
+        chart_month_name=chart_month_name,
+        product_chart_rows=product_chart_rows,
+        max_product_total=max_product_total,
+        total_current_year=total_current_year,
+        total_current_month=total_current_month,
+        today=date.today().isoformat(),
+        years=sorted(
+            {int(row["report_year"]) for row in years if row["report_year"]} | {date.today().year},
+            reverse=True,
+        ),
+    )
+
+
+@app.get("/register-intelijen/rin5/export-excel")
+@login_required
+def export_register_intelijen_rin5_excel():
+    params = []
+    conditions = []
+    search = request.args.get("q", "").strip()[:150]
+    bidang = request.args.get("bidang", "").strip()
+    month = request.args.get("month", "").strip()
+    year = request.args.get("year", "").strip()
+    if search:
+        search_value = f"%{search}%"
+        conditions.append(
+            """(entries.intelligence_product_type LIKE %s
+                OR entries.intelligence_product_number LIKE %s
+                OR entries.field_code LIKE %s OR entries.subject LIKE %s
+                OR entries.leader_disposition LIKE %s OR entries.remarks LIKE %s
+                OR users.full_name LIKE %s)"""
+        )
+        params.extend([search_value] * 7)
+    if bidang in ISSUE_CODES:
+        conditions.append("entries.field_code=%s")
+        params.append(bidang)
+    if month.isdigit() and 1 <= int(month) <= 12:
+        conditions.append("MONTH(entries.intelligence_product_date)=%s")
+        params.append(int(month))
+    if year.isdigit():
+        conditions.append("YEAR(entries.intelligence_product_date)=%s")
+        params.append(int(year))
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    entries = fetch_all(
+        f"""SELECT entries.*, users.full_name AS creator_full_name
+            FROM register_intelijen_rin5_entries entries
+            JOIN users ON users.id=entries.created_by
+            {where_clause}
+            ORDER BY entries.intelligence_product_date ASC, entries.id ASC""",
+        tuple(params),
+    )
+    organization_name = (fetch_one("SELECT organization_name FROM organization_settings WHERE id=1") or {}).get("organization_name") or "Kejaksaan Negeri Buleleng"
+    headers = [
+        "No", "Nama Satker", "Jenis Produk Intelijen", "Nomor Produk Intelijen",
+        "Tanggal Produk Intelijen", "Subdit/Seksi/Subseksi", "Perihal",
+        "Disposisi Pimpinan", "Keterangan",
+    ]
+    rows = []
+    for index, entry in enumerate(entries, 1):
+        product_date = entry.get("intelligence_product_date")
+        if isinstance(product_date, datetime):
+            product_date = product_date.date()
+        product_date_text = product_date.strftime("%d/%m/%Y") if isinstance(product_date, date) else "-"
+        field_text = f"{entry.get('field_code') or '-'} - {ISSUE_CODE_LABELS.get(entry.get('field_code'), '-')}"
+        rows.append([
+            index,
+            organization_name,
+            entry.get("intelligence_product_type") or "",
+            entry.get("intelligence_product_number") or "",
+            product_date_text,
+            field_text,
+            entry.get("subject") or "",
+            entry.get("leader_disposition") or "",
+            entry.get("remarks") or "",
+        ])
+    workbook = make_xlsx(headers, rows, "R.IN.5")
+    filename = f"RIN5-REGISTER-PRODUK-INTELIJEN-{date.today().strftime('%Y%m%d')}.xlsx"
+    return send_file(
+        workbook,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.get("/register-intelijen/export-excel")
+@login_required
+def export_register_intelijen_excel():
+    params = []
+    conditions = []
+    search = request.args.get("q", "").strip()[:150]
+    bidang = request.args.get("bidang", "").strip()
+    month = request.args.get("month", "").strip()
+    year = request.args.get("year", "").strip()
+    if search:
+        search_value = f"%{search}%"
+        conditions.append(
+            """(entries.field_code LIKE %s OR entries.source_name LIKE %s
+                OR entries.information_value LIKE %s
+                OR entries.information_description LIKE %s OR entries.notes LIKE %s
+                OR entries.disposition LIKE %s OR entries.follow_up LIKE %s
+                OR entries.remarks LIKE %s OR users.full_name LIKE %s)"""
+        )
+        params.extend([search_value] * 9)
+    if bidang in ISSUE_CODES:
+        conditions.append("entries.field_code=%s")
+        params.append(bidang)
+    if month.isdigit() and 1 <= int(month) <= 12:
+        conditions.append("MONTH(entries.report_date)=%s")
+        params.append(int(month))
+    if year.isdigit():
+        conditions.append("YEAR(entries.report_date)=%s")
+        params.append(int(year))
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    entries = fetch_all(
+        f"""SELECT entries.*, users.full_name AS creator_full_name
+            FROM register_intelijen_entries entries
+            JOIN users ON users.id=entries.created_by
+            {where_clause}
+            ORDER BY entries.report_date ASC, entries.received_time ASC, entries.id ASC""",
+        tuple(params),
+    )
+    organization_name = (fetch_one("SELECT organization_name FROM organization_settings WHERE id=1") or {}).get("organization_name") or "Kejaksaan Negeri Buleleng"
+    headers = [
+        "No", "Nama Satker", "Tanggal Laporan", "Bidang", "Waktu Diterima",
+        "Sumber/Bapul", "Nilai Data/Informasi", "Uraian Informasi",
+        "Catatan", "Disposisi/Tindakan", "Tindaklanjut", "Keterangan",
+    ]
+    rows = []
+    for index, entry in enumerate(entries, 1):
+        report_date = entry.get("report_date")
+        if isinstance(report_date, datetime):
+            report_date = report_date.date()
+        report_date_text = report_date.strftime("%d/%m/%Y") if isinstance(report_date, date) else "-"
+        field_text = f"{entry.get('field_code') or '-'} - {ISSUE_CODE_LABELS.get(entry.get('field_code'), '-')}"
+        rows.append([
+            index,
+            organization_name,
+            report_date_text,
+            field_text,
+            format_time_value(entry.get("received_time")),
+            entry.get("source_name") or "",
+            entry.get("information_value") or "",
+            entry.get("information_description") or "",
+            entry.get("notes") or "",
+            entry.get("disposition") or "",
+            entry.get("follow_up") or "",
+            entry.get("remarks") or "",
+        ])
+    workbook = make_xlsx(headers, rows, "R.IN.3")
+    filename = f"RIN3-REGISTER-KERJA-INTELIJEN-{date.today().strftime('%Y%m%d')}.xlsx"
+    return send_file(
+        workbook,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.get("/register-intelijen/rin5/export-pdf")
+@login_required
+def export_register_intelijen_rin5_pdf():
+    params = []
+    conditions = []
+    search = request.args.get("q", "").strip()[:150]
+    bidang = request.args.get("bidang", "").strip()
+    month = request.args.get("month", "").strip()
+    year = request.args.get("year", "").strip()
+    use_scan_signature = request.args.get("use_scan_signature") == "1"
+    use_digital_stamp = request.args.get("use_digital_stamp") == "1"
+    use_acting_kajari = request.args.get("use_acting_kajari") == "1"
+    use_acting_kasi = request.args.get("use_acting_kasi") == "1"
+    signature_date_raw = request.args.get("signature_date", "").strip()
+    try:
+        signature_date = datetime.strptime(signature_date_raw, "%Y-%m-%d").date() if signature_date_raw else date.today()
+    except ValueError:
+        signature_date = date.today()
+    if search:
+        search_value = f"%{search}%"
+        conditions.append(
+            """(entries.intelligence_product_type LIKE %s
+                OR entries.intelligence_product_number LIKE %s
+                OR entries.field_code LIKE %s OR entries.subject LIKE %s
+                OR entries.leader_disposition LIKE %s OR entries.remarks LIKE %s
+                OR users.full_name LIKE %s)"""
+        )
+        params.extend([search_value] * 7)
+    if bidang in ISSUE_CODES:
+        conditions.append("entries.field_code=%s")
+        params.append(bidang)
+    if month.isdigit() and 1 <= int(month) <= 12:
+        conditions.append("MONTH(entries.intelligence_product_date)=%s")
+        params.append(int(month))
+    if year.isdigit():
+        conditions.append("YEAR(entries.intelligence_product_date)=%s")
+        params.append(int(year))
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    rows = fetch_all(
+        f"""SELECT entries.*, users.full_name AS creator_full_name
+            FROM register_intelijen_rin5_entries entries
+            JOIN users ON users.id=entries.created_by
+            {where_clause}
+            ORDER BY entries.intelligence_product_date ASC, entries.id ASC""",
+        tuple(params),
+    )
+    organization = fetch_one("SELECT * FROM organization_settings WHERE id=1") or {}
+    organization_name = organization.get("organization_name") or "Kejaksaan Negeri Buleleng"
+    kajari = fetch_one("SELECT * FROM signatories WHERE position_code='kajari'") or {}
+    kasi = fetch_one("SELECT * FROM signatories WHERE position_code='kasi_intel'") or {}
+
+    def acting_signer(base_signer, prefix, enabled):
+        if not enabled:
+            return base_signer
+        acting_type = str(request.args.get(f"{prefix}_type") or "").strip().lower()
+        acting_label = "Plt." if acting_type == "plt" else "Plh." if acting_type == "plh" else ""
+        base_position = str(base_signer.get("position_name") or "").strip()
+        signer_name = str(request.args.get(f"{prefix}_name") or base_signer.get("full_name") or "").strip()
+        signer_position_detail = str(request.args.get(f"{prefix}_position") or "").strip()
+        signer_nip = str(request.args.get(f"{prefix}_nip") or "").strip()
+        rank_nip = signer_position_detail
+        if signer_nip:
+            rank_nip = f"{rank_nip} NIP. {signer_nip}".strip()
+        acting_position = f"{acting_label} {base_position}".strip() if acting_label else base_position
+        result = dict(base_signer)
+        result.update(
+            full_name=signer_name or "-",
+            position_name=acting_position or "-",
+            rank_nip=rank_nip or "-",
+            signature_image=None,
+        )
+        return result
+
+    kajari = acting_signer(kajari, "acting_kajari", use_acting_kajari)
+    kasi = acting_signer(kasi, "acting_kasi", use_acting_kasi)
+
+    buffer = BytesIO()
+    folio_landscape = landscape((8.5 * inch, 13 * inch))
+    page_width, page_height = folio_landscape
+    document = SimpleDocTemplate(
+        buffer,
+        pagesize=folio_landscape,
+        leftMargin=1 * cm,
+        rightMargin=1 * cm,
+        topMargin=3 * cm,
+        bottomMargin=1.1 * cm,
+        allowSplitting=True,
+    )
+    product_dates = []
+    for row in rows:
+        product_date = row.get("intelligence_product_date")
+        if isinstance(product_date, datetime):
+            product_date = product_date.date()
+        if isinstance(product_date, date):
+            product_dates.append(product_date)
+    if product_dates:
+        first_date, last_date = min(product_dates), max(product_dates)
+        if first_date.year == last_date.year and first_date.month == last_date.month:
+            period_text = f"{MONTH_NAMES_ID[first_date.month]} {first_date.year}"
+        elif first_date.year == last_date.year:
+            period_text = f"{MONTH_NAMES_ID[first_date.month]} - {MONTH_NAMES_ID[last_date.month]} {first_date.year}"
+        else:
+            period_text = f"{MONTH_NAMES_ID[first_date.month]} {first_date.year} - {MONTH_NAMES_ID[last_date.month]} {last_date.year}"
+    elif month.isdigit() and year.isdigit() and 1 <= int(month) <= 12:
+        period_text = f"{MONTH_NAMES_ID[int(month)]} {year}"
+    else:
+        period_text = year if year.isdigit() else "-"
+
+    cell_style = ParagraphStyle(
+        "Rin5Cell",
+        fontName=PDF_FONT_NAME,
+        fontSize=8.5,
+        leading=10.2,
+        alignment=TA_LEFT,
+        spaceBefore=0,
+        spaceAfter=0,
+        splitLongWords=True,
+    )
+    center_style = ParagraphStyle("Rin5CellCenter", parent=cell_style, alignment=TA_CENTER)
+    header_style = ParagraphStyle(
+        "Rin5Header",
+        parent=cell_style,
+        fontName=PDF_FONT_BOLD,
+        alignment=TA_CENTER,
+    )
+    signature_style = ParagraphStyle(
+        "Rin5Signature",
+        fontName=PDF_FONT_NAME,
+        fontSize=10,
+        leading=12,
+        alignment=TA_CENTER,
+        spaceBefore=0,
+        spaceAfter=0,
+    )
+    signature_name_style = ParagraphStyle(
+        "Rin5SignatureName",
+        parent=signature_style,
+        fontName=PDF_FONT_BOLD,
+    )
+    recap_style = ParagraphStyle(
+        "Rin5Recap",
+        fontName=PDF_FONT_NAME,
+        fontSize=10,
+        leading=12,
+        alignment=TA_LEFT,
+        spaceBefore=0,
+        spaceAfter=0,
+    )
+    recap_title_style = ParagraphStyle(
+        "Rin5RecapTitle",
+        parent=recap_style,
+        fontName=PDF_FONT_BOLD,
+    )
+
+    def rin5_cell(value, style=cell_style):
+        text = re.sub(r"\s+", " ", str(value or "-").strip()) or "-"
+        return Paragraph(escape(text), style)
+
+    def safe_upload_path(base_dir, filename):
+        if not filename:
+            return None
+        path = (base_dir / filename).resolve()
+        try:
+            path.relative_to(base_dir.resolve())
+        except ValueError:
+            return None
+        return path if path.is_file() else None
+
+    def pdf_image(path, max_width, max_height):
+        if not path:
+            return Spacer(1, max_height)
+        try:
+            with PILImage.open(path) as image:
+                width, height = image.size
+        except Exception:
+            return Spacer(1, max_height)
+        if not width or not height:
+            return Spacer(1, max_height)
+        ratio = min(max_width / width, max_height / height)
+        return Image(str(path), width=width * ratio, height=height * ratio)
+
+    def signature_image_block(scan_path, stamp_path=None):
+        flowables = []
+        if stamp_path:
+            flowables.append(pdf_image(stamp_path, 2.35 * cm, 2.35 * cm))
+        if scan_path:
+            flowables.append(pdf_image(scan_path, 6.25 * cm, 2.75 * cm))
+        if not flowables:
+            flowables = [Spacer(1, 2.75 * cm)]
+        col_widths = ([2.65 * cm] if stamp_path else []) + ([6.9 * cm] if scan_path else [])
+        if not col_widths:
+            col_widths = [6.9 * cm]
+        image_block = Table([flowables], colWidths=col_widths, hAlign="CENTER")
+        image_block.setStyle(TableStyle([
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        return image_block
+
+    def signature_flowables(signer, prefix_text, date_text=None, include_stamp=False):
+        signer_name = str(signer.get("full_name") or "-")
+        signer_position = str(signer.get("position_name") or "-")
+        signer_rank = str(signer.get("rank_nip") or "-")
+        scan_path = safe_upload_path(SIGNATORY_UPLOAD_DIR, signer.get("signature_image")) if use_scan_signature else None
+        stamp_path = safe_upload_path(ORGANIZATION_UPLOAD_DIR, organization.get("digital_stamp")) if include_stamp else None
+        lines = []
+        if date_text:
+            lines.append(Paragraph(escape(date_text), signature_style))
+        lines.extend([
+            Paragraph(prefix_text, signature_style),
+            Paragraph(escape(signer_position), signature_style),
+            signature_image_block(scan_path, stamp_path),
+            Paragraph(f"<u>{escape(signer_name)}</u>", signature_name_style),
+            Paragraph(escape(signer_rank), signature_style),
+        ])
+        return lines
+
+    table_data = [[
+        rin5_cell("No", header_style),
+        rin5_cell("Nama Satker", header_style),
+        rin5_cell("Jenis Produk Intelijen", header_style),
+        rin5_cell("Nomor Produk Intelijen", header_style),
+        rin5_cell("Tanggal Produk Intelijen", header_style),
+        rin5_cell("Subdit/Seksi/Subseksi", header_style),
+        rin5_cell("Perihal", header_style),
+        rin5_cell("Disposisi Pimpinan", header_style),
+        rin5_cell("Keterangan", header_style),
+    ]]
+    for index, entry in enumerate(rows, 1):
+        product_date = entry.get("intelligence_product_date")
+        if isinstance(product_date, datetime):
+            product_date = product_date.date()
+        date_text = product_date.strftime("%d/%m/%Y") if isinstance(product_date, date) else "-"
+        field_text = f"{entry.get('field_code') or '-'}\n{ISSUE_CODE_LABELS.get(entry.get('field_code'), '-')}"
+        table_data.append([
+            rin5_cell(index, center_style),
+            rin5_cell(organization_name),
+            rin5_cell(entry.get("intelligence_product_type")),
+            rin5_cell(entry.get("intelligence_product_number")),
+            rin5_cell(date_text, center_style),
+            rin5_cell(field_text),
+            rin5_cell(entry.get("subject")),
+            rin5_cell(entry.get("leader_disposition")),
+            rin5_cell(entry.get("remarks"), center_style),
+        ])
+    if len(table_data) == 1:
+        table_data.append([rin5_cell("-") for _ in range(9)])
+    table = LongTable(
+        table_data,
+        colWidths=[0.8 * cm, 2.7 * cm, 3.1 * cm, 3.1 * cm, 2.0 * cm, 4.0 * cm, 6.6 * cm, 6.0 * cm, 2.5 * cm],
+        repeatRows=1,
+        hAlign="LEFT",
+        splitByRow=True,
+        splitInRow=False,
+    )
+    table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, "#000000"),
+        ("BACKGROUND", (0, 0), (-1, 0), "#E8EDF3"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("VALIGN", (0, 0), (-1, 0), "MIDDLE"),
+        ("ALIGN", (0, 0), (0, -1), "CENTER"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2.5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2.5),
+        ("TOPPADDING", (0, 0), (-1, -1), 3.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+    ]))
+
+    report_total = len(rows)
+    recap_block = [
+        Paragraph("Rekapitulasi", recap_title_style),
+        Paragraph("Sisa bulan Lalu :", recap_style),
+        Paragraph(f"Masuk Bulan laporan : {report_total}", recap_style),
+        Paragraph(f"Jumlah : {report_total}", recap_style),
+        Paragraph("Diselesaikan :", recap_style),
+        Paragraph("Sisa Bulan Laporan :", recap_style),
+    ]
+    signature_table = Table(
+        [[
+            signature_flowables(kajari, "Mengetahui", include_stamp=use_digital_stamp),
+            recap_block,
+            signature_flowables(kasi, "", date_text=f"Singaraja, {format_indonesian_date(signature_date)}"),
+        ]],
+        colWidths=[10.2 * cm, 5.0 * cm, 10.2 * cm],
+        hAlign="CENTER",
+    )
+    signature_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+
+    def draw_register_header(pdf_canvas, _document):
+        pdf_canvas.saveState()
+        header_x = _document.leftMargin
+        pdf_canvas.setFillColorRGB(0, 0, 0)
+        pdf_canvas.setFont(PDF_FONT_BOLD, 12)
+        pdf_canvas.drawString(header_x, page_height - 2.05 * cm, "R.IN.5 REGISTER PRODUK INTELIJEN")
+        pdf_canvas.drawString(header_x, page_height - 2.48 * cm, f"Bulan : {period_text}")
+        pdf_canvas.restoreState()
+
+    story = [
+        table,
+        Spacer(1, 0.7 * cm),
+        KeepTogether(signature_table),
+    ]
+    document.build(story, onFirstPage=draw_register_header, onLaterPages=draw_register_header)
+    buffer.seek(0)
+    filename = f"RIN5-REGISTER-PRODUK-INTELIJEN-{date.today().strftime('%Y%m%d')}.pdf"
+    return send_file(buffer, as_attachment=True, download_name=filename, mimetype="application/pdf")
+
+
+@app.route("/register-intelijen/rin5/create", methods=["GET", "POST"])
+@login_required
+def create_register_intelijen_rin5():
+    if request.method == "POST":
+        data = register_intelijen_rin5_form_data()
+        if (not data["intelligence_product_type"] or not data["intelligence_product_number"]
+                or not data["field_code"] or not data["subject"]):
+            flash("Jenis produk, nomor produk, Subdit/Seksi/Subseksi, dan perihal wajib diisi.", "error")
+        else:
+            with get_db().cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO register_intelijen_rin5_entries
+                       (intelligence_product_type, intelligence_product_number,
+                        intelligence_product_date, field_code, subject,
+                        leader_disposition, remarks, created_by)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (
+                        data["intelligence_product_type"], data["intelligence_product_number"],
+                        data["intelligence_product_date"], data["field_code"], data["subject"],
+                        data["leader_disposition"], data["remarks"], session["user_id"],
+                    ),
+                )
+            flash("Data R.IN.5 berhasil disimpan.", "success")
+            return redirect(url_for("register_intelijen_rin5"))
+    else:
+        organization = fetch_one("SELECT organization_name FROM organization_settings WHERE id=1") or {}
+        data = {
+            "satker_name": organization.get("organization_name") or "Kejaksaan Negeri Buleleng",
+            "intelligence_product_type": "",
+            "intelligence_product_number": "",
+            "intelligence_product_date": date.today().isoformat(),
+            "field_code": "",
+            "subject": "",
+            "leader_disposition": "",
+            "remarks": "",
+        }
+    return render_template(
+        "register_intelijen_rin5_form.html",
+        active="register_intelijen_rin5",
+        form_title="Buat Register Produk Intelijen R.IN.5",
+        form_description="Input data produk intelijen untuk register R.IN.5.",
+        data=data,
+        issue_code_labels=ISSUE_CODE_LABELS,
+        entry=None,
+    )
+
+
+@app.route("/register-intelijen/rin5/<int:entry_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_register_intelijen_rin5(entry_id):
+    entry = fetch_one("SELECT * FROM register_intelijen_rin5_entries WHERE id=%s", (entry_id,))
+    if not entry:
+        flash("Data R.IN.5 tidak ditemukan.", "error")
+        return redirect(url_for("register_intelijen_rin5"))
+    if session.get("role") != "admin" and entry["created_by"] != session["user_id"]:
+        flash("Anda tidak dapat mengubah data R.IN.5 ini.", "error")
+        return redirect(url_for("register_intelijen_rin5"))
+    if request.method == "POST":
+        data = register_intelijen_rin5_form_data()
+        if (not data["intelligence_product_type"] or not data["intelligence_product_number"]
+                or not data["field_code"] or not data["subject"]):
+            flash("Jenis produk, nomor produk, Subdit/Seksi/Subseksi, dan perihal wajib diisi.", "error")
+        else:
+            with get_db().cursor() as cursor:
+                cursor.execute(
+                    """UPDATE register_intelijen_rin5_entries
+                       SET intelligence_product_type=%s, intelligence_product_number=%s,
+                           intelligence_product_date=%s, field_code=%s, subject=%s,
+                           leader_disposition=%s, remarks=%s
+                       WHERE id=%s""",
+                    (
+                        data["intelligence_product_type"], data["intelligence_product_number"],
+                        data["intelligence_product_date"], data["field_code"], data["subject"],
+                        data["leader_disposition"], data["remarks"], entry_id,
+                    ),
+                )
+            flash("Data R.IN.5 berhasil diperbarui.", "success")
+            return redirect(url_for("register_intelijen_rin5"))
+    else:
+        organization = fetch_one("SELECT organization_name FROM organization_settings WHERE id=1") or {}
+        data = {
+            "satker_name": organization.get("organization_name") or "Kejaksaan Negeri Buleleng",
+            "intelligence_product_type": entry.get("intelligence_product_type") or "",
+            "intelligence_product_number": entry.get("intelligence_product_number") or "",
+            "intelligence_product_date": entry["intelligence_product_date"].isoformat() if entry.get("intelligence_product_date") else date.today().isoformat(),
+            "field_code": entry.get("field_code") or "",
+            "subject": entry.get("subject") or "",
+            "leader_disposition": entry.get("leader_disposition") or "",
+            "remarks": entry.get("remarks") or "",
+        }
+    return render_template(
+        "register_intelijen_rin5_form.html",
+        active="register_intelijen_rin5",
+        form_title="Edit Register Produk Intelijen R.IN.5",
+        form_description="Perbarui data produk intelijen pada register R.IN.5.",
+        data=data,
+        issue_code_labels=ISSUE_CODE_LABELS,
+        entry=entry,
+    )
+
+
+@app.post("/register-intelijen/rin5/<int:entry_id>/delete")
+@login_required
+def delete_register_intelijen_rin5(entry_id):
+    entry = fetch_one("SELECT id,created_by FROM register_intelijen_rin5_entries WHERE id=%s", (entry_id,))
+    if not entry:
+        flash("Data R.IN.5 tidak ditemukan.", "error")
+    elif session.get("role") != "admin" and entry["created_by"] != session["user_id"]:
+        flash("Anda tidak dapat menghapus data R.IN.5 ini.", "error")
+    else:
+        with get_db().cursor() as cursor:
+            cursor.execute("DELETE FROM register_intelijen_rin5_entries WHERE id=%s", (entry_id,))
+        flash("Data R.IN.5 berhasil dihapus.", "success")
+    return redirect(url_for("register_intelijen_rin5"))
+
+
+def register_information_sentence(content):
+    soup = BeautifulSoup(content or "", "html.parser")
+    first_block = soup.find("li") or soup.find(["p", "div"])
+    text = (first_block.get_text(" ", strip=True) if first_block else
+            soup.get_text(" ", strip=True))
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(
+        r"^\s*(?:(?:\(?\d+\)?|[IVXLCDM]+)[.)\-:]|[•●▪\-–—])\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not text:
+        return ""
+
+    protected = re.sub(
+        r"\b(?:PT|CV|No|Dr|Ir|Sdr|Tn|Ny|Jl|Kab|Kec|Prov|S\.H|M\.H|S\.E|S\.Sos)\.",
+        lambda match: match.group(0).replace(".", "\u2024"),
+        text,
+        flags=re.IGNORECASE,
+    )
+    sentence_end = re.search(r"\.(?=\s|$)", protected)
+    if sentence_end:
+        protected = protected[:sentence_end.end()]
+    return protected.replace("\u2024", ".").strip()
+
+
+@app.post("/reports/<report_type>/<int:report_id>/register-intelijen")
+@login_required
+def register_report_intelijen(report_type, report_id):
+    if report_type == "lapinhar":
+        report = accessible_lapinhar(report_id)
+        document_label = "Laporan Informasi Harian"
+        return_endpoint = "lapinhar"
+    elif report_type == "lapinsus":
+        report = accessible_lapinsus(report_id)
+        document_label = "Laporan Informasi Khusus"
+        return_endpoint = "lapinsus"
+    else:
+        abort(404)
+
+    if report is None:
+        return jsonify(message="Laporan tidak ditemukan atau tidak dapat Anda akses."), 403
+    if report.get("status") == "draft":
+        return jsonify(message=f"Lengkapi dan simpan {document_label.upper()} sebelum diregister."), 409
+    if not report.get("report_date") or report.get("issue_code") not in ISSUE_CODES:
+        return jsonify(message="Tanggal dan bidang laporan harus tersedia sebelum diregister."), 422
+
+    information_description = register_information_sentence(report.get("facts"))
+    if not information_description:
+        return jsonify(message="Informasi yang diperoleh masih kosong."), 422
+
+    duplicate = fetch_one(
+        """SELECT id FROM register_intelijen_entries
+           WHERE source_report_type=%s AND source_report_id=%s""",
+        (report_type, report_id),
+    )
+    if duplicate:
+        return jsonify(
+            message=f"{document_label.upper()} ini sudah masuk Register Intelijen.",
+            already_registered=True,
+            register_id=duplicate["id"],
+        ), 409
+
+    payload = request.get_json(silent=True) or {}
+    received_time = str(payload.get("received_time") or datetime.now().strftime("%H:%M")).strip()
+    try:
+        received_time = datetime.strptime(received_time, "%H:%M").strftime("%H:%M:%S")
+    except ValueError:
+        return jsonify(message="Waktu diterima tidak valid."), 422
+
+    information_value = str(payload.get("information_value") or "A1").strip().upper()
+    if information_value not in REGISTER_INFORMATION_VALUES:
+        return jsonify(message="Nilai data/informasi tidak valid."), 422
+
+    disposition = str(payload.get("disposition") or "TL KE KEJATI").strip()[:2000]
+    follow_up = str(
+        payload.get("follow_up") or "-SEGERA TL TERUSKAN KE KEJATI -ARSIPKAN"
+    ).strip()[:2000]
+    remarks = str(payload.get("remarks") or "Arsip").strip()[:255]
+    if not disposition or not follow_up or not remarks:
+        return jsonify(message="Disposisi, tindak lanjut, dan keterangan wajib diisi."), 422
+
+    try:
+        with get_db().cursor() as cursor:
+            cursor.execute(
+                """INSERT INTO register_intelijen_entries
+                   (register_code,source_report_type,source_report_id,report_date,field_code,
+                    received_time,source_name,information_value,information_description,
+                    notes,disposition,follow_up,remarks,created_by)
+                   VALUES ('R.IN.3',%s,%s,%s,%s,%s,'Kejari Buleleng',%s,%s,%s,%s,%s,%s,%s)""",
+                (
+                    report_type,
+                    report_id,
+                    report["report_date"],
+                    report["issue_code"],
+                    received_time,
+                    information_value,
+                    information_description,
+                    document_label,
+                    disposition,
+                    follow_up,
+                    remarks,
+                    session["user_id"],
+                ),
+            )
+            register_id = cursor.lastrowid
+            cursor.execute(
+                """INSERT IGNORE INTO register_intelijen_rin5_entries
+                   (source_report_type,source_report_id,intelligence_product_type,
+                    intelligence_product_number,intelligence_product_date,field_code,
+                    subject,leader_disposition,remarks,created_by)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (
+                    report_type,
+                    report_id,
+                    document_label,
+                    report.get("report_number") or "-",
+                    report["report_date"],
+                    report["issue_code"],
+                    report.get("title") or "-",
+                    disposition,
+                    remarks,
+                    session["user_id"],
+                ),
+            )
+    except pymysql.err.IntegrityError:
+        existing = fetch_one(
+            """SELECT id FROM register_intelijen_entries
+               WHERE source_report_type=%s AND source_report_id=%s""",
+            (report_type, report_id),
+        )
+        return jsonify(
+            message=f"{document_label.upper()} ini sudah masuk Register Intelijen.",
+            already_registered=True,
+            register_id=existing["id"] if existing else None,
+        ), 409
+
+    return jsonify(
+        message=f"{document_label.upper()} berhasil dimasukkan ke R.IN.3 dan R.IN.5.",
+        registered=True,
+        register_id=register_id,
+        redirect_url=url_for(return_endpoint),
+    )
+
+
+@app.get("/register-intelijen/export-pdf")
+@login_required
+def export_register_intelijen_pdf():
+    params = []
+    conditions = []
+    search = request.args.get("q", "").strip()[:150]
+    bidang = request.args.get("bidang", "").strip()
+    month = request.args.get("month", "").strip()
+    year = request.args.get("year", "").strip()
+    use_scan_signature = request.args.get("use_scan_signature") == "1"
+    use_digital_stamp = request.args.get("use_digital_stamp") == "1"
+    use_acting_kajari = request.args.get("use_acting_kajari") == "1"
+    use_acting_kasi = request.args.get("use_acting_kasi") == "1"
+    signature_date_raw = request.args.get("signature_date", "").strip()
+    try:
+        signature_date = datetime.strptime(signature_date_raw, "%Y-%m-%d").date() if signature_date_raw else date.today()
+    except ValueError:
+        signature_date = date.today()
+    if search:
+        search_value = f"%{search}%"
+        conditions.append(
+            """(entries.field_code LIKE %s OR entries.source_name LIKE %s
+                OR entries.information_value LIKE %s
+                OR entries.information_description LIKE %s OR entries.notes LIKE %s
+                OR entries.disposition LIKE %s OR entries.follow_up LIKE %s
+                OR entries.remarks LIKE %s OR users.full_name LIKE %s)"""
+        )
+        params.extend([search_value] * 9)
+    if bidang in ISSUE_CODES:
+        conditions.append("entries.field_code=%s")
+        params.append(bidang)
+    if month.isdigit() and 1 <= int(month) <= 12:
+        conditions.append("MONTH(entries.report_date)=%s")
+        params.append(int(month))
+    if year.isdigit():
+        conditions.append("YEAR(entries.report_date)=%s")
+        params.append(int(year))
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    rows = fetch_all(
+        f"""SELECT entries.* FROM register_intelijen_entries entries
+            JOIN users ON users.id=entries.created_by
+            {where_clause}
+            ORDER BY entries.report_date ASC, entries.received_time ASC, entries.id ASC""",
+        tuple(params),
+    )
+    organization = fetch_one("SELECT * FROM organization_settings WHERE id=1") or {}
+    kajari = fetch_one("SELECT * FROM signatories WHERE position_code='kajari'") or {}
+    kasi = fetch_one("SELECT * FROM signatories WHERE position_code='kasi_intel'") or {}
+
+    def acting_signer(base_signer, prefix, enabled):
+        if not enabled:
+            return base_signer
+        acting_type = str(request.args.get(f"{prefix}_type") or "").strip().lower()
+        acting_label = "Plt." if acting_type == "plt" else "Plh." if acting_type == "plh" else ""
+        base_position = str(base_signer.get("position_name") or "").strip()
+        signer_name = str(request.args.get(f"{prefix}_name") or base_signer.get("full_name") or "").strip()
+        signer_position_detail = str(request.args.get(f"{prefix}_position") or "").strip()
+        signer_nip = str(request.args.get(f"{prefix}_nip") or "").strip()
+        rank_nip = signer_position_detail
+        if signer_nip:
+            rank_nip = f"{rank_nip} NIP. {signer_nip}".strip()
+        acting_position = f"{acting_label} {base_position}".strip() if acting_label else base_position
+        result = dict(base_signer)
+        result.update(
+            full_name=signer_name or "-",
+            position_name=acting_position or "-",
+            rank_nip=rank_nip or "-",
+            signature_image=None,
+        )
+        return result
+
+    kajari = acting_signer(kajari, "acting_kajari", use_acting_kajari)
+    kasi = acting_signer(kasi, "acting_kasi", use_acting_kasi)
+
+    buffer = BytesIO()
+    folio_landscape = landscape((8.5 * inch, 13 * inch))
+    page_width, page_height = folio_landscape
+    document = SimpleDocTemplate(
+        buffer,
+        pagesize=folio_landscape,
+        leftMargin=1 * cm,
+        rightMargin=1 * cm,
+        topMargin=3 * cm,
+        bottomMargin=1.1 * cm,
+        allowSplitting=True,
+    )
+    satker = organization.get("organization_name") or "Kejaksaan Negeri Buleleng"
+    report_dates = []
+    for row in rows:
+        report_date = row.get("report_date")
+        if isinstance(report_date, datetime):
+            report_date = report_date.date()
+        if isinstance(report_date, date):
+            report_dates.append(report_date)
+    if report_dates:
+        first_date, last_date = min(report_dates), max(report_dates)
+        if first_date.year == last_date.year and first_date.month == last_date.month:
+            period_text = f"{MONTH_NAMES_ID[first_date.month]} {first_date.year}"
+        elif first_date.year == last_date.year:
+            period_text = (
+                f"{MONTH_NAMES_ID[first_date.month]} - "
+                f"{MONTH_NAMES_ID[last_date.month]} {first_date.year}"
+            )
+        else:
+            period_text = (
+                f"{MONTH_NAMES_ID[first_date.month]} {first_date.year} - "
+                f"{MONTH_NAMES_ID[last_date.month]} {last_date.year}"
+            )
+    elif month.isdigit() and year.isdigit() and 1 <= int(month) <= 12:
+        period_text = f"{MONTH_NAMES_ID[int(month)]} {year}"
+    else:
+        period_text = year if year.isdigit() else "-"
+
+    body_style = ParagraphStyle(
+        "RegisterCell",
+        fontName=PDF_FONT_NAME,
+        fontSize=7.5,
+        leading=9,
+        spaceBefore=0,
+        spaceAfter=0,
+        alignment=TA_LEFT,
+        splitLongWords=True,
+    )
+    center_style = ParagraphStyle(
+        "RegisterCellCenter",
+        parent=body_style,
+        alignment=TA_CENTER,
+    )
+    header_style = ParagraphStyle(
+        "RegisterHeader",
+        parent=center_style,
+        fontName=PDF_FONT_BOLD,
+        fontSize=7.5,
+        leading=8.8,
+    )
+    signature_style = ParagraphStyle(
+        "RegisterSignature",
+        fontName=PDF_FONT_NAME,
+        fontSize=10,
+        leading=12,
+        alignment=TA_CENTER,
+        spaceBefore=0,
+        spaceAfter=0,
+    )
+    title_style = ParagraphStyle(
+        "RegisterTitle",
+        fontName=PDF_FONT_BOLD,
+        fontSize=12,
+        leading=14,
+        alignment=TA_LEFT,
+        spaceBefore=0,
+        spaceAfter=0,
+    )
+    period_style = ParagraphStyle(
+        "RegisterPeriod",
+        fontName=PDF_FONT_BOLD,
+        fontSize=12,
+        leading=14,
+        alignment=TA_LEFT,
+        spaceBefore=0,
+        spaceAfter=0,
+    )
+    signature_name_style = ParagraphStyle(
+        "RegisterSignatureName",
+        parent=signature_style,
+        fontName=PDF_FONT_BOLD,
+    )
+    recap_style = ParagraphStyle(
+        "RegisterRecap",
+        fontName=PDF_FONT_NAME,
+        fontSize=10,
+        leading=12,
+        alignment=TA_LEFT,
+        spaceBefore=0,
+        spaceAfter=0,
+    )
+    recap_title_style = ParagraphStyle(
+        "RegisterRecapTitle",
+        parent=recap_style,
+        fontName=PDF_FONT_BOLD,
+    )
+
+    def cell_paragraph(value, style=body_style):
+        text = re.sub(r"\s+", " ", str(value or "-").strip()) or "-"
+        return Paragraph(escape(text), style)
+
+    def safe_upload_path(base_dir, filename):
+        if not filename:
+            return None
+        path = (base_dir / filename).resolve()
+        try:
+            path.relative_to(base_dir.resolve())
+        except ValueError:
+            return None
+        return path if path.is_file() else None
+
+    def pdf_image(path, max_width, max_height):
+        if not path:
+            return Spacer(1, max_height)
+        try:
+            with PILImage.open(path) as image:
+                width, height = image.size
+        except Exception:
+            return Spacer(1, max_height)
+        if not width or not height:
+            return Spacer(1, max_height)
+        ratio = min(max_width / width, max_height / height)
+        return Image(str(path), width=width * ratio, height=height * ratio)
+
+    def signature_image_block(scan_path, stamp_path=None):
+        flowables = []
+        if stamp_path:
+            flowables.append(pdf_image(stamp_path, 2.35 * cm, 2.35 * cm))
+        if scan_path:
+            flowables.append(pdf_image(scan_path, 6.25 * cm, 2.75 * cm))
+        if not flowables:
+            flowables = [Spacer(1, 2.75 * cm)]
+        col_widths = ([2.65 * cm] if stamp_path else []) + ([6.9 * cm] if scan_path else [])
+        if not col_widths:
+            col_widths = [6.9 * cm]
+        image_block = Table(
+            [flowables],
+            colWidths=col_widths,
+            hAlign="CENTER",
+        )
+        image_block.setStyle(
+            TableStyle(
+                [
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ]
+            )
+        )
+        return image_block
+
+    def signature_flowables(signer, prefix_text, date_text=None, include_stamp=False):
+        signer_name = str(signer.get("full_name") or "-")
+        signer_position = str(signer.get("position_name") or "-")
+        signer_rank = str(signer.get("rank_nip") or "-")
+        scan_path = safe_upload_path(SIGNATORY_UPLOAD_DIR, signer.get("signature_image")) if use_scan_signature else None
+        stamp_path = safe_upload_path(ORGANIZATION_UPLOAD_DIR, organization.get("digital_stamp")) if include_stamp else None
+        image_block = signature_image_block(scan_path, stamp_path)
+        lines = []
+        if date_text:
+            lines.append(Paragraph(escape(date_text), signature_style))
+        lines.extend([
+            Paragraph(prefix_text, signature_style),
+            Paragraph(escape(signer_position), signature_style),
+            image_block,
+            Paragraph(f"<u>{escape(signer_name)}</u>", signature_name_style),
+            Paragraph(escape(signer_rank), signature_style),
+        ])
+        return lines
+
+    headers = [
+        "No",
+        "Nama Satker",
+        "Tanggal<br/>Laporan",
+        "Bidang",
+        "Waktu<br/>Diterima",
+        "Sumber/<br/>Bapul",
+        "Nilai Data/<br/>Informasi",
+        "Uraian Informasi",
+        "Catatan",
+        "Disposisi/<br/>Tindakan",
+        "Tindak Lanjut",
+        "Keterangan",
+    ]
+    table_data = [[Paragraph(text, header_style) for text in headers]]
+    for index, row in enumerate(rows, 1):
+        report_date = row.get("report_date")
+        if isinstance(report_date, (date, datetime)):
+            report_date = report_date.strftime("%d/%m/%Y")
+        table_data.append(
+            [
+                cell_paragraph(index, center_style),
+                cell_paragraph(satker),
+                cell_paragraph(report_date, center_style),
+                cell_paragraph(issue_code_label(row.get("field_code"))),
+                cell_paragraph(
+                    f"{format_time_value(row.get('received_time'))} Wita"
+                    if row.get("received_time")
+                    else "-",
+                    center_style,
+                ),
+                cell_paragraph(row.get("source_name")),
+                cell_paragraph(row.get("information_value"), center_style),
+                cell_paragraph(row.get("information_description")),
+                cell_paragraph(row.get("notes")),
+                cell_paragraph(row.get("disposition")),
+                cell_paragraph(row.get("follow_up")),
+                cell_paragraph(row.get("remarks"), center_style),
+            ]
+        )
+
+    column_widths = [
+        0.8 * cm,
+        2.7 * cm,
+        1.9 * cm,
+        3.55 * cm,
+        1.55 * cm,
+        2.15 * cm,
+        1.35 * cm,
+        6.7 * cm,
+        2.35 * cm,
+        2.85 * cm,
+        2.85 * cm,
+        1.55 * cm,
+    ]
+    register_table = LongTable(
+        table_data,
+        colWidths=column_widths,
+        repeatRows=1,
+        hAlign="LEFT",
+        splitByRow=True,
+        splitInRow=False,
+    )
+    register_table.setStyle(
+        TableStyle(
+            [
+                ("GRID", (0, 0), (-1, -1), 0.5, "#000000"),
+                ("BACKGROUND", (0, 0), (-1, 0), "#E8EDF3"),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("VALIGN", (0, 0), (-1, 0), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 2.5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2.5),
+                ("TOPPADDING", (0, 0), (-1, -1), 3.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+            ]
+        )
+    )
+
+    report_total = len(rows)
+    recap_block = [
+        Paragraph("Rekapitulasi", recap_title_style),
+        Paragraph("Sisa bulan Lalu :", recap_style),
+        Paragraph(f"Masuk Bulan laporan : {report_total}", recap_style),
+        Paragraph(f"Jumlah : {report_total}", recap_style),
+        Paragraph("Diselesaikan :", recap_style),
+        Paragraph("Sisa Bulan Laporan :", recap_style),
+    ]
+    signature_table = Table(
+        [
+            [
+                signature_flowables(
+                    kajari,
+                    "Mengetahui",
+                    include_stamp=use_digital_stamp,
+                ),
+                recap_block,
+                signature_flowables(
+                    kasi,
+                    "",
+                    date_text=f"Singaraja, {format_indonesian_date(signature_date)}",
+                ),
+            ]
+        ],
+        colWidths=[10.2 * cm, 5.0 * cm, 10.2 * cm],
+        hAlign="CENTER",
+    )
+    signature_table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+
+    def draw_register_header(pdf_canvas, _document):
+        pdf_canvas.saveState()
+        header_x = _document.leftMargin
+        pdf_canvas.setFillColorRGB(0, 0, 0)
+        pdf_canvas.setFont(PDF_FONT_BOLD, 12)
+        pdf_canvas.drawString(header_x, page_height - 2.05 * cm, "R.IN.3 REGISTER KERJA INTELIJEN")
+        pdf_canvas.drawString(header_x, page_height - 2.48 * cm, f"Bulan : {period_text}")
+        pdf_canvas.restoreState()
+
+    story = [
+        register_table,
+        Spacer(1, 0.7 * cm),
+        KeepTogether(signature_table),
+    ]
+    document.build(story, onFirstPage=draw_register_header, onLaterPages=draw_register_header)
+    buffer.seek(0)
+    filename = f"RIN3-REGISTER-KERJA-INTELIJEN-{date.today().strftime('%Y%m%d')}.pdf"
+    return send_file(buffer, as_attachment=True, download_name=filename, mimetype="application/pdf")
 
 
 @app.route("/lapinhar")
@@ -243,18 +2088,91 @@ def dashboard():
 def lapinhar():
     conditions = ["reports.report_type = 'lapinhar'"]
     params = []
-    base_where = " AND ".join(conditions)
+    current_year = date.today().year
+    chart_month = request.args.get("chart_month", "all").strip() or "all"
+    base_where = "reports.report_type = 'lapinhar' AND YEAR(reports.report_date) = %s"
     summary = fetch_one(
         f"""SELECT COUNT(*) AS total,
             SUM(reports.lapinsus_status='belum') AS lapinsus_belum,
-            SUM(reports.inteliz_status='belum') AS inteliz_belum
-            FROM reports WHERE {base_where}""", tuple(params)
+            SUM(reports.inteliz_status='belum') AS inteliz_belum,
+            SUM(reports.status<>'draft' AND NOT EXISTS(
+                SELECT 1 FROM register_intelijen_entries register_entries
+                WHERE register_entries.source_report_type='lapinhar'
+                AND register_entries.source_report_id=reports.id
+            )) AS register_belum
+            FROM reports WHERE {base_where}""", (current_year,)
     )
     report_summary = {
         "total": int(summary["total"] or 0),
         "lapinsus_belum": int(summary["lapinsus_belum"] or 0),
         "inteliz_belum": int(summary["inteliz_belum"] or 0),
+        "register_belum": int(summary["register_belum"] or 0),
     }
+    issue_chart_conditions = [
+        "report_type='lapinhar'",
+        "YEAR(report_date)=%s",
+        "issue_code IS NOT NULL",
+        "issue_code <> ''",
+    ]
+    issue_chart_params = [current_year]
+    if chart_month.isdigit() and 1 <= int(chart_month) <= 12:
+        issue_chart_conditions.append("MONTH(report_date)=%s")
+        issue_chart_params.append(int(chart_month))
+        chart_month_name = MONTH_NAMES_ID[int(chart_month)]
+    else:
+        chart_month = "all"
+        chart_month_name = "Semua bulan"
+    issue_chart_source = fetch_all(
+        f"""SELECT issue_code, COUNT(*) AS total
+           FROM reports
+           WHERE {' AND '.join(issue_chart_conditions)}
+           GROUP BY issue_code""",
+        tuple(issue_chart_params),
+    )
+    issue_totals = {
+        str(row["issue_code"] or "").strip(): int(row["total"] or 0)
+        for row in issue_chart_source
+    }
+    issue_chart_groups = [
+        {"group": "Ds", "codes": ["Ds.1", "Ds.2", "Ds.3"]},
+        {"group": "Dip", "codes": ["Dip.1", "Dip.2", "Dip.3", "Dip.4"]},
+        {"group": "Dsb", "codes": ["Dsb.1", "Dsb.2", "Dsb.3", "Dsb.4"]},
+        {"group": "Dek", "codes": ["Dek.1", "Dek.2", "Dek.3", "Dek.4"]},
+        {"group": "Dpp", "codes": ["Dpp.1", "Dpp.2", "Dpp.3", "Dpp.4"]},
+        {"group": "Dti", "codes": ["Dti.1", "Dti.2", "Dti.3"]},
+    ]
+    max_issue_chart_total = max(
+        [issue_totals.get(code, 0) for group in issue_chart_groups for code in group["codes"]] or [0]
+    )
+    issue_chart_axis_max = max(1, max_issue_chart_total)
+    issue_chart_axis_ticks = sorted({0, issue_chart_axis_max // 2, issue_chart_axis_max})
+    issue_chart_colors = {
+        "Ds": "#14b8a6",
+        "Dip": "#3b82f6",
+        "Dsb": "#8b5cf6",
+        "Dek": "#f59e0b",
+        "Dpp": "#f43f5e",
+        "Dti": "#22c55e",
+    }
+    issue_chart_dataset = {"labels": [], "totals": [], "colors": [], "groups": []}
+    for group in issue_chart_groups:
+        group["bars"] = [
+            {
+                "code": code,
+                "label": ISSUE_CODE_LABELS.get(code, code),
+                "total": issue_totals.get(code, 0),
+            }
+            for code in group["codes"]
+        ]
+        start_index = len(issue_chart_dataset["labels"])
+        for bar in group["bars"]:
+            issue_chart_dataset["labels"].append(bar["code"])
+            issue_chart_dataset["totals"].append(bar["total"])
+            issue_chart_dataset["colors"].append(issue_chart_colors[group["group"]])
+        end_index = len(issue_chart_dataset["labels"]) - 1
+        issue_chart_dataset["groups"].append(
+            {"name": group["group"], "start": start_index, "end": end_index}
+        )
 
     search = request.args.get("q", "").strip()[:150]
     if search:
@@ -278,19 +2196,43 @@ def lapinhar():
     page = min(page, total_pages)
     offset = (page - 1) * per_page
     reports = fetch_all(
-        "SELECT reports.id, reports.report_number, reports.title, reports.created_by, reports.inteliz_status, "
+        "SELECT reports.id, reports.report_number, reports.title, reports.status, reports.created_by, reports.inteliz_status, "
         "reports.lapinsus_status, reports.created_at, users.full_name AS creator_full_name, "
+        "EXISTS(SELECT 1 FROM register_intelijen_entries register_entries "
+        "WHERE register_entries.source_report_type='lapinhar' "
+        "AND register_entries.source_report_id=reports.id) AS is_registered, "
         "(SELECT COUNT(*) FROM report_attachments WHERE report_attachments.report_id=reports.id) AS attachment_count "
         "FROM reports JOIN users ON users.id = reports.created_by "
         f"WHERE {where_clause} ORDER BY reports.created_at DESC LIMIT %s OFFSET %s",
         tuple(params + [per_page, offset]),
     )
+    draft_choice = None
+    try:
+        draft_choice_id = int(request.args.get("choose_draft", "0"))
+    except ValueError:
+        draft_choice_id = 0
+    if draft_choice_id:
+        draft_choice = fetch_one(
+            """SELECT id,report_number,title,created_at FROM lapinhar_reports
+               WHERE id=%s AND created_by=%s AND status='draft'""",
+            (draft_choice_id, session["user_id"]),
+        )
     return render_template("reports.html", report_type="LAPINHAR", reports=reports,
-                           report_summary=report_summary, active="lapinhar",
-                           search=search, page=page, total_pages=total_pages,
-                           filtered_total=int(filtered_total), per_page=per_page,
-                           auto_connect=request.args.get("connect_inteliz") == "1",
-                           next_url=url_for("lapinhar"))
+                            report_summary=report_summary, active="lapinhar",
+                            issue_chart_groups=issue_chart_groups,
+                            max_issue_chart_total=max_issue_chart_total,
+                            issue_chart_axis_max=issue_chart_axis_max,
+                            issue_chart_axis_ticks=issue_chart_axis_ticks,
+                            issue_chart_dataset=issue_chart_dataset,
+                            current_year=current_year,
+                            chart_month=chart_month,
+                            chart_month_name=chart_month_name,
+                            month_names=MONTH_NAMES_ID,
+                            search=search, page=page, total_pages=total_pages,
+                            filtered_total=int(filtered_total), per_page=per_page,
+                            draft_choice=draft_choice,
+                            auto_connect=request.args.get("connect_inteliz") == "1",
+                            next_url=url_for("lapinhar"))
 
 
 def normalize_whatsapp_number(value):
@@ -348,6 +2290,9 @@ def send_lapinhar_whatsapp(report_id):
     if report is None:
         flash("Laporan tidak ditemukan atau tidak dapat Anda akses.", "error")
         return redirect(url_for("lapinhar"))
+    if report.get("status") == "draft":
+        flash("Lengkapi dan simpan LAPINHAR sebelum mengirim WhatsApp.", "warning")
+        return redirect(url_for("lapinhar"))
     setting = fetch_one(
         "SELECT contact_name, phone_number FROM whatsapp_user_settings WHERE user_id=%s",
         (session["user_id"],),
@@ -369,7 +2314,7 @@ def send_lapinhar_whatsapp(report_id):
         whatsapp_plain_text(report["facts"]), "", "*II. SUMBER INFORMASI*",
         whatsapp_plain_text(report["source_name"]), "", "*III. TREN PERKEMBANGAN / PERKIRAAN*",
         whatsapp_plain_text(report["analysis"]), "", "*IV. PENDAPAT / SARAN*",
-        whatsapp_plain_text(report["recommendation"]), "", "Dum🙏",
+        whatsapp_plain_text(report["recommendation"]), "", "Terimakasih🙏",
     ])
     attachment_rows = fetch_all(
         """SELECT attachment_group, sort_order, image_path
@@ -385,23 +2330,137 @@ def send_lapinhar_whatsapp(report_id):
                            uses_archive=len(attachment_rows) > 1)
 
 
+@app.get("/lapinsus/<int:report_id>/whatsapp")
+@login_required
+def send_lapinsus_whatsapp(report_id):
+    report = accessible_lapinsus(report_id)
+    if report is None:
+        flash("LAPINSUS tidak ditemukan atau tidak dapat Anda akses.", "error")
+        return redirect(url_for("lapinsus"))
+    if report.get("status") == "draft":
+        flash("Lengkapi dan simpan LAPINSUS sebelum mengirim WhatsApp.", "warning")
+        return redirect(url_for("lapinsus"))
+    setting = fetch_one(
+        "SELECT contact_name, phone_number FROM whatsapp_user_settings WHERE user_id=%s",
+        (session["user_id"],),
+    )
+    if not setting:
+        flash("Simpan nama dan nomor tujuan WhatsApp terlebih dahulu.", "error")
+        return redirect(url_for("integration_settings", _anchor="whatsapp"))
+    phone = normalize_whatsapp_number(setting["phone_number"])
+    if not re.fullmatch(r"\d{9,15}", phone):
+        flash("Nomor WhatsApp pada konfigurasi tidak valid.", "error")
+        return redirect(url_for("integration_settings", _anchor="whatsapp"))
+    organization_name = (report.get("organization") or "KEJAKSAAN NEGERI BULELENG").title()
+    sender_name = f"Kepala {organization_name}"
+    acting_type = str(report.get("acting_officer_type") or "").strip().lower()
+    if acting_type in {"plh", "plt"}:
+        sender_name = f"{acting_type.title()}. Kepala {organization_name}"
+    recipient_name = setting["contact_name"].rstrip(". ") + "."
+    message = "\n".join([
+        "*Laporan Khusus*", "", "Kepada Yth.", recipient_name, "",
+        f"Dari : {sender_name}", "", f"Perihal : {report['title']}", "",
+        "*I. INFORMASI YANG DIPEROLEH*",
+        whatsapp_plain_text(report["facts"]), "", "*II. SUMBER INFORMASI*",
+        whatsapp_plain_text(report["source_name"]), "", "*III. TREN PERKEMBANGAN / PERKIRAAN*",
+        whatsapp_plain_text(report["analysis"]), "", "*IV. PENDAPAT / SARAN*",
+        whatsapp_plain_text(report["recommendation"]), "", "Terimakasih🙏",
+    ])
+    attachment_rows = fetch_all(
+        """SELECT attachment_group, sort_order, image_path
+           FROM report_attachments WHERE report_id=%s
+           ORDER BY attachment_group, sort_order, id""",
+        (report_id,),
+    ) if request.args.get("attachments") == "1" else []
+    downloads = ([url_for("download_all_lapinsus_attachments", report_id=report_id)]
+                 if attachment_rows else [])
+    whatsapp_url = f"https://web.whatsapp.com/send?phone={phone}&text={quote(message)}"
+    return render_template("whatsapp_launch.html", whatsapp_url=whatsapp_url,
+                           downloads=downloads, attachment_count=len(attachment_rows),
+                           uses_archive=len(attachment_rows) > 1)
+
+
 @app.route("/lapinsus")
 @login_required
 def lapinsus():
     conditions = ["reports.report_type = 'lapinsus'"]
     params = []
-    summary_where = " AND ".join(conditions)
+    current_year = date.today().year
+    chart_month = request.args.get("chart_month", "all").strip() or "all"
+    summary_where = "reports.report_type = 'lapinsus' AND YEAR(reports.report_date) = %s"
     summary = fetch_one(
         f"""SELECT COUNT(*) total,
             SUM(inteliz_status='belum') inteliz_belum,
-            SUM(sipede_status='belum') sipede_belum
-            FROM lapinsus_reports reports WHERE {summary_where}""", tuple(params),
+            SUM(sipede_status='belum') sipede_belum,
+            SUM(reports.status<>'draft' AND NOT EXISTS(
+                SELECT 1 FROM register_intelijen_entries register_entries
+                WHERE register_entries.source_report_type='lapinsus'
+                AND register_entries.source_report_id=reports.id
+            )) register_belum
+            FROM lapinsus_reports reports WHERE {summary_where}""", (current_year,),
     )
     report_summary = {
         "total": int(summary["total"] or 0),
         "inteliz_belum": int(summary["inteliz_belum"] or 0),
         "sipede_belum": int(summary["sipede_belum"] or 0),
+        "register_belum": int(summary["register_belum"] or 0),
     }
+    issue_chart_conditions = [
+        "report_type='lapinsus'",
+        "YEAR(report_date)=%s",
+        "issue_code IS NOT NULL",
+        "issue_code <> ''",
+    ]
+    issue_chart_params = [current_year]
+    if chart_month.isdigit() and 1 <= int(chart_month) <= 12:
+        issue_chart_conditions.append("MONTH(report_date)=%s")
+        issue_chart_params.append(int(chart_month))
+        chart_month_name = MONTH_NAMES_ID[int(chart_month)]
+    else:
+        chart_month = "all"
+        chart_month_name = "Semua bulan"
+    issue_chart_source = fetch_all(
+        f"""SELECT issue_code, COUNT(*) AS total
+            FROM reports
+            WHERE {' AND '.join(issue_chart_conditions)}
+            GROUP BY issue_code""",
+        tuple(issue_chart_params),
+    )
+    issue_totals = {
+        str(row["issue_code"] or "").strip(): int(row["total"] or 0)
+        for row in issue_chart_source
+    }
+    issue_chart_groups = [
+        {"group": "Ds", "codes": ["Ds.1", "Ds.2", "Ds.3"]},
+        {"group": "Dip", "codes": ["Dip.1", "Dip.2", "Dip.3", "Dip.4"]},
+        {"group": "Dsb", "codes": ["Dsb.1", "Dsb.2", "Dsb.3", "Dsb.4"]},
+        {"group": "Dek", "codes": ["Dek.1", "Dek.2", "Dek.3", "Dek.4"]},
+        {"group": "Dpp", "codes": ["Dpp.1", "Dpp.2", "Dpp.3", "Dpp.4"]},
+        {"group": "Dti", "codes": ["Dti.1", "Dti.2", "Dti.3"]},
+    ]
+    max_issue_chart_total = max(
+        [issue_totals.get(code, 0) for group in issue_chart_groups for code in group["codes"]] or [0]
+    )
+    issue_chart_axis_max = max(1, max_issue_chart_total)
+    issue_chart_axis_ticks = sorted({0, issue_chart_axis_max // 2, issue_chart_axis_max})
+    issue_chart_colors = {
+        "Ds": "#14b8a6",
+        "Dip": "#3b82f6",
+        "Dsb": "#8b5cf6",
+        "Dek": "#f59e0b",
+        "Dpp": "#f43f5e",
+        "Dti": "#22c55e",
+    }
+    issue_chart_dataset = {"labels": [], "totals": [], "colors": [], "groups": []}
+    for group in issue_chart_groups:
+        start_index = len(issue_chart_dataset["labels"])
+        for code in group["codes"]:
+            issue_chart_dataset["labels"].append(code)
+            issue_chart_dataset["totals"].append(issue_totals.get(code, 0))
+            issue_chart_dataset["colors"].append(issue_chart_colors[group["group"]])
+        issue_chart_dataset["groups"].append(
+            {"name": group["group"], "start": start_index, "end": len(issue_chart_dataset["labels"]) - 1}
+        )
     search = request.args.get("q", "").strip()[:150]
     if search:
         columns = ["reports.report_number LIKE %s", "reports.title LIKE %s"]
@@ -424,15 +2483,40 @@ def lapinsus():
     page = min(page, total_pages)
     reports = fetch_all(
         "SELECT reports.id, reports.report_number, reports.title, reports.created_by, reports.status, reports.inteliz_status, "
-        "reports.sipede_status, reports.created_at, "
-        "users.full_name creator_full_name FROM reports JOIN users ON users.id=reports.created_by "
+        "reports.sipede_status, reports.created_at, users.full_name creator_full_name, "
+        "EXISTS(SELECT 1 FROM register_intelijen_entries register_entries "
+        "WHERE register_entries.source_report_type='lapinsus' "
+        "AND register_entries.source_report_id=reports.id) AS is_registered, "
+        "(SELECT COUNT(*) FROM report_attachments WHERE report_attachments.report_id=reports.id) AS attachment_count "
+        "FROM reports JOIN users ON users.id=reports.created_by "
         f"WHERE {where_clause} ORDER BY reports.created_at DESC LIMIT %s OFFSET %s",
         tuple(params + [per_page, (page - 1) * per_page]),
     )
+    draft_choice = None
+    try:
+        draft_choice_id = int(request.args.get("choose_draft", "0"))
+    except ValueError:
+        draft_choice_id = 0
+    if draft_choice_id:
+        draft_choice = fetch_one(
+            """SELECT id,report_number,title,created_at FROM lapinsus_reports
+               WHERE id=%s AND created_by=%s AND status='draft'""",
+            (draft_choice_id, session["user_id"]),
+        )
     return render_template("reports.html", report_type="LAPINSUS", reports=reports, active="lapinsus",
-                           report_summary=report_summary,
-                           search=search, page=page, total_pages=total_pages,
-                           filtered_total=filtered_total, per_page=per_page)
+                            report_summary=report_summary,
+                            current_year=current_year,
+                            chart_month=chart_month,
+                            chart_month_name=chart_month_name,
+                            month_names=MONTH_NAMES_ID,
+                            issue_chart_dataset=issue_chart_dataset,
+                            issue_chart_axis_max=issue_chart_axis_max,
+                            issue_chart_axis_ticks=issue_chart_axis_ticks,
+                            search=search, page=page, total_pages=total_pages,
+                            filtered_total=filtered_total, per_page=per_page,
+                            draft_choice=draft_choice,
+                            auto_connect=request.args.get("connect_inteliz") == "1",
+                            next_url=url_for("lapinsus"))
 
 
 def accessible_lapinsus(report_id):
@@ -443,8 +2527,13 @@ def accessible_lapinsus(report_id):
 
 
 def lapinsus_sequence_number(report_number):
-    match = re.match(r"^R\.LIK-(\d+)/", report_number or "")
+    match = re.match(r"^R-LIK-(\d+)[A-Z]*/", report_number or "", re.IGNORECASE)
     return int(match.group(1)) if match else 0
+
+
+def lapinsus_sequence_label(report_number):
+    match = re.match(r"^R-LIK-(\d+[A-Z]*)/", report_number or "", re.IGNORECASE)
+    return match.group(1).upper() if match else ""
 
 
 def compose_lapinsus_number(sequence_number, institution_code, issue_code, report_date):
@@ -454,7 +2543,7 @@ def compose_lapinsus_number(sequence_number, institution_code, issue_code, repor
         return ""
     if not sequence_number or issue_code not in ISSUE_CODES:
         return ""
-    return f"R.LIK-{sequence_number}/{institution_code}/{issue_code}/{selected_date.month:02d}/{selected_date.year}"
+    return f"R-LIK-{sequence_number}/{institution_code}/{issue_code}/{selected_date.month:02d}/{selected_date.year}"
 
 
 def reserve_lapinsus_number(document_year=None):
@@ -464,14 +2553,23 @@ def reserve_lapinsus_number(document_year=None):
     try:
         connection.begin()
         with connection.cursor() as cursor:
-            cursor.execute("SELECT next_number FROM document_counters WHERE document_type='lapinsus' AND document_year=%s FOR UPDATE", (document_year,))
-            counter = cursor.fetchone()
-            if counter is None:
-                sequence_number = 1
-                cursor.execute("INSERT INTO document_counters (document_type,document_year,next_number) VALUES ('lapinsus',%s,2)", (document_year,))
+            cursor.execute(
+                """SELECT id,sequence_number FROM released_document_numbers
+                   WHERE document_type='lapinsus' AND document_year=%s
+                   ORDER BY sequence_number LIMIT 1 FOR UPDATE""", (document_year,))
+            released = cursor.fetchone()
+            if released:
+                sequence_number = released["sequence_number"]
+                cursor.execute("DELETE FROM released_document_numbers WHERE id=%s", (released["id"],))
             else:
-                sequence_number = counter["next_number"]
-                cursor.execute("UPDATE document_counters SET next_number=next_number+1 WHERE document_type='lapinsus' AND document_year=%s", (document_year,))
+                cursor.execute("SELECT next_number FROM document_counters WHERE document_type='lapinsus' AND document_year=%s FOR UPDATE", (document_year,))
+                counter = cursor.fetchone()
+                if counter is None:
+                    sequence_number = 1
+                    cursor.execute("INSERT INTO document_counters (document_type,document_year,next_number) VALUES ('lapinsus',%s,2)", (document_year,))
+                else:
+                    sequence_number = counter["next_number"]
+                    cursor.execute("UPDATE document_counters SET next_number=next_number+1 WHERE document_type='lapinsus' AND document_year=%s", (document_year,))
             cursor.execute(
                 "INSERT INTO document_number_reservations "
                 "(reservation_token,document_type,document_year,sequence_number,created_by) VALUES (%s,'lapinsus',%s,%s,%s)",
@@ -555,10 +2653,54 @@ def lapinhar_form_data():
     subsection_code = request.form.get("subsection_signer", "kasubsi_1")
     if subsection_code not in {"kasi_intel", "kasubsi_1", "kasubsi_2"}:
         subsection_code = "kasubsi_1"
+    data["subsection_code"] = subsection_code
     subsection = fetch_one(
         "SELECT * FROM signatories WHERE position_code = %s", (subsection_code,)
     )
     data["show_authentication"] = subsection_code != "kasi_intel"
+    data["use_scanned_signatures"] = (
+        1 if request.form.get("use_scanned_signatures") == "1" else 0
+    )
+    data["use_digital_stamp"] = (
+        1 if request.form.get("use_digital_stamp") == "1" else 0
+    )
+    letter_signature_type = request.form.get("letter_signature_type", "tte").strip()
+    data["letter_signature_type"] = (
+        letter_signature_type
+        if letter_signature_type in {"tte", "scan", "empty"} else "tte"
+    )
+    data["letter_use_digital_stamp"] = (
+        1 if request.form.get("letter_use_digital_stamp") == "1" else 0
+    )
+    acting_officer_type = request.form.get("acting_officer_type", "").strip().lower()
+    data["acting_officer_type"] = (
+        acting_officer_type if acting_officer_type in {"plh", "plt"} else None
+    )
+    data["acting_officer_name"] = request.form.get("acting_officer_name", "").strip()
+    data["acting_officer_position"] = (
+        "Kepala Kejaksaan Negeri Buleleng"
+        if data["acting_officer_type"] else ""
+    )
+    data["acting_officer_rank"] = request.form.get("acting_officer_rank", "").strip()
+    data["acting_officer_nip"] = request.form.get("acting_officer_nip", "").strip()
+    report_acting_enabled = request.form.get("report_acting_enabled") == "1"
+    data["report_acting_enabled"] = report_acting_enabled
+    report_acting_type = request.form.get("report_acting_type", "").strip().lower()
+    data["report_acting_type"] = (
+        report_acting_type if report_acting_enabled and report_acting_type in {"plh", "plt"} else None
+    )
+    data["report_acting_name"] = (
+        request.form.get("report_acting_name", "").strip()
+        if data["report_acting_type"] else ""
+    )
+    data["report_acting_position"] = (
+        request.form.get("report_acting_position", "").strip()
+        if data["report_acting_type"] else ""
+    )
+    data["report_acting_nip"] = (
+        request.form.get("report_acting_nip", "").strip()
+        if data["report_acting_type"] else ""
+    )
     if kasi:
         data.update(auth_position=kasi["position_name"], auth_name=kasi["full_name"], auth_rank_nip=kasi["rank_nip"])
     if subsection:
@@ -566,6 +2708,21 @@ def lapinhar_form_data():
                     creator_rank_nip=subsection["rank_nip"])
     else:
         data.update(creator_position="", creator_name="", creator_rank_nip="")
+    if data["report_acting_type"]:
+        prefix = "Plh." if data["report_acting_type"] == "plh" else "Plt."
+        nip = data["report_acting_nip"]
+        nip_text = nip if "NIP" in nip.upper() else f"NIP. {nip}"
+        data.update(
+            auth_position=f"{prefix} Kepala Seksi Intelijen",
+            auth_name=data["report_acting_name"],
+            auth_rank_nip=f"{data['report_acting_position']} {nip_text}",
+        )
+        if data["subsection_code"] == "kasi_intel":
+            data.update(
+                creator_position=f"{prefix} Kepala Seksi Intelijen",
+                creator_name=data["report_acting_name"],
+                creator_rank_nip=f"{data['report_acting_position']} {nip_text}",
+            )
     return data
 
 
@@ -576,16 +2733,25 @@ def reserve_lapinhar_number(document_year=None):
     try:
         connection.begin()
         with connection.cursor() as cursor:
-            cursor.execute("SELECT next_number FROM document_counters WHERE document_type=%s AND document_year=%s FOR UPDATE", ("lapinhar", document_year))
-            counter = cursor.fetchone()
-            if counter is None:
-                cursor.execute("INSERT INTO document_counters (document_type,document_year,next_number) VALUES (%s,%s,2)",
-                               ("lapinhar", document_year))
-                sequence_number = 1
+            cursor.execute(
+                """SELECT id,sequence_number FROM released_document_numbers
+                   WHERE document_type=%s AND document_year=%s
+                   ORDER BY sequence_number LIMIT 1 FOR UPDATE""", ("lapinhar", document_year))
+            released = cursor.fetchone()
+            if released:
+                sequence_number = released["sequence_number"]
+                cursor.execute("DELETE FROM released_document_numbers WHERE id=%s", (released["id"],))
             else:
-                sequence_number = counter["next_number"]
-                cursor.execute("UPDATE document_counters SET next_number=next_number+1 WHERE document_type=%s AND document_year=%s",
-                               ("lapinhar", document_year))
+                cursor.execute("SELECT next_number FROM document_counters WHERE document_type=%s AND document_year=%s FOR UPDATE", ("lapinhar", document_year))
+                counter = cursor.fetchone()
+                if counter is None:
+                    cursor.execute("INSERT INTO document_counters (document_type,document_year,next_number) VALUES (%s,%s,2)",
+                                   ("lapinhar", document_year))
+                    sequence_number = 1
+                else:
+                    sequence_number = counter["next_number"]
+                    cursor.execute("UPDATE document_counters SET next_number=next_number+1 WHERE document_type=%s AND document_year=%s",
+                                   ("lapinhar", document_year))
             cursor.execute(
                 """INSERT INTO document_number_reservations
                    (reservation_token, document_type, document_year, sequence_number, created_by)
@@ -607,13 +2773,207 @@ def accessible_lapinhar(report_id):
 
 
 def report_sequence_number(report_number):
-    match = re.match(r"^R\.LIH-(\d+)/", report_number or "")
+    match = re.match(r"^R-LIH-(\d+)[A-Z]*/", report_number or "", re.IGNORECASE)
     return int(match.group(1)) if match else 0
+
+
+def report_sequence_label(report_number):
+    match = re.match(r"^R-LIH-(\d+[A-Z]*)/", report_number or "", re.IGNORECASE)
+    return match.group(1).upper() if match else ""
 
 
 def report_number_year(report_number):
     match = re.search(r"/(\d{4})$", report_number or "")
     return int(match.group(1)) if match else 0
+
+
+def sequence_suffix_rank(suffix):
+    rank = 0
+    for character in (suffix or "").upper():
+        rank = rank * 26 + (ord(character) - ord("A") + 1)
+    return rank
+
+
+def sequence_suffix_from_rank(rank):
+    result = ""
+    while rank > 0:
+        rank, remainder = divmod(rank - 1, 26)
+        result = chr(ord("A") + remainder) + result
+    return result
+
+
+def sequence_label_parts(report_number, document_type):
+    prefix = r"R-LIH" if document_type == "lapinhar" else r"R-LIK"
+    match = re.match(rf"^{prefix}-(\d+)([A-Z]*)/", report_number or "", re.IGNORECASE)
+    return (int(match.group(1)), match.group(2).upper()) if match else (0, "")
+
+
+def next_backdated_sequence_label(document_type, selected_date, report_id, cursor=None):
+    table_name = "lapinhar_reports" if document_type == "lapinhar" else "lapinsus_reports"
+    def query_all(query, params):
+        if cursor is None:
+            return fetch_all(query, params)
+        cursor.execute(query, params)
+        return cursor.fetchall()
+
+    def query_one(query, params):
+        if cursor is None:
+            return fetch_one(query, params)
+        cursor.execute(query, params)
+        return cursor.fetchone()
+
+    rows = query_all(
+        f"""SELECT report_number FROM {table_name}
+            WHERE report_date=%s AND id<>%s ORDER BY id""",
+        (selected_date, report_id),
+    )
+    booked = query_all(
+        """SELECT sequence_label AS report_number
+           FROM backdated_number_reservations
+           WHERE document_type=%s AND report_date=%s AND report_id<>%s""",
+        (document_type, selected_date, report_id),
+    )
+    parsed = [sequence_label_parts(row["report_number"], document_type) for row in rows]
+    parsed.extend(
+        (int(match.group(1)), match.group(2).upper())
+        for row in booked
+        if (match := re.match(r"^(\d+)([A-Z]*)$", row["report_number"] or "", re.IGNORECASE))
+    )
+    parsed = [item for item in parsed if item[0]]
+    if parsed:
+        base_number = max(item[0] for item in parsed)
+        highest_suffix = max(
+            (sequence_suffix_rank(suffix) for number, suffix in parsed if number == base_number),
+            default=0,
+        )
+    else:
+        previous = query_one(
+            f"""SELECT report_number FROM {table_name}
+                WHERE report_date<%s AND id<>%s
+                ORDER BY report_date DESC,id DESC LIMIT 1""",
+            (selected_date, report_id),
+        )
+        base_number, _suffix = sequence_label_parts(
+            previous["report_number"] if previous else "", document_type
+        )
+        if not base_number:
+            base_number = 1
+        highest_suffix = 0
+    return f"{base_number}{sequence_suffix_from_rank(highest_suffix + 1)}"
+
+
+def reserve_backdated_number(document_type, report_id, selected_date):
+    if document_type not in {"lapinhar", "lapinsus"}:
+        raise ValueError("Jenis laporan tidak valid.")
+    connection = get_db()
+    token = uuid.uuid4().hex
+    lock_name = f"backdated:{document_type}:{selected_date.isoformat()}"
+    lock_acquired = False
+    try:
+        connection.begin()
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT GET_LOCK(%s, 5) AS acquired", (lock_name,))
+            lock_acquired = bool(cursor.fetchone()["acquired"])
+            if not lock_acquired:
+                raise RuntimeError("Nomor sedang diproses pengguna lain. Silakan coba lagi.")
+            cursor.execute(
+                "DELETE FROM backdated_number_reservations "
+                "WHERE reserved_at < CURRENT_TIMESTAMP - INTERVAL 2 HOUR"
+            )
+            cursor.execute(
+                "DELETE FROM backdated_number_reservations "
+                "WHERE document_type=%s AND report_id=%s",
+                (document_type, report_id),
+            )
+            sequence_label = next_backdated_sequence_label(
+                document_type, selected_date, report_id, cursor
+            )
+            cursor.execute(
+                """INSERT INTO backdated_number_reservations
+                   (reservation_token,document_type,report_id,report_date,
+                    sequence_label,created_by)
+                   VALUES (%s,%s,%s,%s,%s,%s)""",
+                (token, document_type, report_id, selected_date,
+                 sequence_label, session["user_id"]),
+            )
+        connection.commit()
+        return {"reservation_token": token, "sequence_label": sequence_label}
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        if lock_acquired:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+
+
+@app.post("/reports/backdated-number/reserve")
+@login_required
+def reserve_backdated_number_endpoint():
+    payload = request.get_json(silent=True) or {}
+    document_type = str(payload.get("document_kind", "")).strip().lower()
+    try:
+        report_id = int(payload.get("report_id"))
+        selected_date = date.fromisoformat(str(payload.get("report_date", "")))
+    except (TypeError, ValueError):
+        return jsonify(message="Tanggal atau laporan tidak valid."), 400
+    report = (accessible_lapinhar(report_id) if document_type == "lapinhar"
+              else accessible_lapinsus(report_id) if document_type == "lapinsus" else None)
+    if report is None:
+        abort(404)
+    if not report.get("report_date") or selected_date >= report["report_date"]:
+        return jsonify(message="Reservasi khusus hanya untuk tanggal mundur."), 400
+    try:
+        return jsonify(**reserve_backdated_number(document_type, report_id, selected_date))
+    except RuntimeError as error:
+        return jsonify(message=str(error)), 409
+
+
+@app.post("/reports/backdated-number/cancel")
+@login_required
+def cancel_backdated_number_endpoint():
+    payload = request.get_json(silent=True) or request.form
+    token = str(payload.get("reservation_token", "")).strip()
+    if token:
+        with get_db().cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM backdated_number_reservations "
+                "WHERE reservation_token=%s AND created_by=%s",
+                (token, session["user_id"]),
+            )
+    return ("", 204)
+
+
+def release_original_document_number(report_id, document_type):
+    connection = get_db()
+    try:
+        connection.begin()
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """SELECT id,document_year,sequence_number
+                   FROM document_number_reservations
+                   WHERE report_id=%s AND document_type=%s AND status='used'
+                   FOR UPDATE""",
+                (report_id, document_type),
+            )
+            reservation = cursor.fetchone()
+            if not reservation:
+                connection.commit()
+                return
+            cursor.execute(
+                """INSERT IGNORE INTO released_document_numbers
+                   (document_type,document_year,sequence_number)
+                   VALUES (%s,%s,%s)""",
+                (document_type, reservation["document_year"], reservation["sequence_number"]),
+            )
+            cursor.execute(
+                "DELETE FROM document_number_reservations WHERE id=%s",
+                (reservation["id"],),
+            )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
 
 
 def compose_lapinhar_number(sequence_number, institution_code, issue_code, report_date):
@@ -623,7 +2983,7 @@ def compose_lapinhar_number(sequence_number, institution_code, issue_code, repor
         return ""
     if not sequence_number or issue_code not in ISSUE_CODES:
         return ""
-    return f"R.LIH-{sequence_number}/{institution_code}/{issue_code}/{selected_date.month:02d}/{selected_date.year}"
+    return f"R-LIH-{sequence_number}/{institution_code}/{issue_code}/{selected_date.month:02d}/{selected_date.year}"
 
 
 def lapinhar_number_available(report_number, reservation_token="", report_id=None):
@@ -669,6 +3029,61 @@ def reload_lapinhar_number():
     return jsonify(**reservation)
 
 
+def normalize_attachment_image(content):
+    try:
+        with PILImage.open(BytesIO(content)) as source_image:
+            normalized = ImageOps.exif_transpose(source_image)
+            if normalized.mode not in ("RGB", "L"):
+                background = PILImage.new("RGB", normalized.size, "white")
+                alpha_image = normalized.convert("RGBA")
+                background.paste(alpha_image, mask=alpha_image.getchannel("A"))
+                normalized = background
+            elif normalized.mode == "L":
+                normalized = normalized.convert("RGB")
+            else:
+                normalized = normalized.copy()
+    except Exception:
+        return None
+
+    width, height = normalized.size
+    longest_side = max(width, height)
+    if longest_side > MAX_ATTACHMENT_DIMENSION:
+        resize_ratio = MAX_ATTACHMENT_DIMENSION / float(longest_side)
+        normalized = normalized.resize(
+            (max(1, int(width * resize_ratio)), max(1, int(height * resize_ratio))),
+            PILImage.Resampling.LANCZOS,
+        )
+
+    working = normalized
+    quality_steps = (82, 74, 68, 60, 54, 48, 42, 36, 30)
+    for _attempt in range(6):
+        for quality in quality_steps:
+            output = BytesIO()
+            working.save(output, format="JPEG", quality=quality, optimize=True)
+            compressed = output.getvalue()
+            if len(compressed) <= MAX_ATTACHMENT_SIZE_BYTES:
+                return {
+                    "content": compressed,
+                    "width": working.width,
+                    "height": working.height,
+                    "extension": ".jpg",
+                }
+        reduced_width = max(1, int(working.width * 0.88))
+        reduced_height = max(1, int(working.height * 0.88))
+        if (reduced_width, reduced_height) == working.size:
+            break
+        working = working.resize((reduced_width, reduced_height), PILImage.Resampling.LANCZOS)
+
+    output = BytesIO()
+    working.save(output, format="JPEG", quality=30, optimize=True)
+    return {
+        "content": output.getvalue(),
+        "width": working.width,
+        "height": working.height,
+        "extension": ".jpg",
+    }
+
+
 def collect_attachments():
     attachments = []
     keys = sorted((key for key in request.files if key.startswith("attachment_images_")),
@@ -680,17 +3095,20 @@ def collect_attachments():
             if not uploaded.filename or uploaded.mimetype not in ALLOWED_IMAGE_TYPES:
                 continue
             content = uploaded.read()
-            try:
-                image = PILImage.open(BytesIO(content))
-                image_width, image_height = image.size
-                image.verify()
-            except Exception:
+            normalized_image = normalize_attachment_image(content)
+            if not normalized_image:
                 continue
             uploaded.seek(0)
             image_index = len(images) + 1
             scale = max(40, min(100, request.form.get(f"attachment_scale_{group_number}_{image_index}", 100, type=int)))
-            images.append({"filename": secure_filename(uploaded.filename), "content": content,
-                           "width": image_width, "height": image_height, "scale": scale})
+            original_name = Path(secure_filename(uploaded.filename)).stem or f"lampiran_{group_number}_{image_index}"
+            images.append({
+                "filename": f"{original_name}{normalized_image['extension']}",
+                "content": normalized_image["content"],
+                "width": normalized_image["width"],
+                "height": normalized_image["height"],
+                "scale": scale,
+            })
         if images:
             attachments.append({
                 "group": group_number,
@@ -812,9 +3230,69 @@ def attachment_layout(attachment):
     return "side" if len(images) == 2 and all(image["height"] > image["width"] for image in images) else "stack"
 
 
+def create_empty_report_draft(document_type, reservation):
+    if document_type not in {"lapinhar", "lapinsus"}:
+        raise ValueError("Jenis draft laporan tidak valid.")
+    organization = fetch_one("SELECT * FROM organization_settings WHERE id=1") or {
+        "organization_name": "KEJAKSAAN NEGERI BULELENG", "institution_code": "N.1.11",
+    }
+    signatories = {
+        row["position_code"]: row for row in
+        fetch_all("SELECT * FROM signatories WHERE position_code IN ('kasi_intel','kasubsi_1')")
+    }
+    kasi, creator = signatories.get("kasi_intel") or {}, signatories.get("kasubsi_1") or {}
+    selected_date = date.today()
+    prefix = "R-LIH" if document_type == "lapinhar" else "R-LIK"
+    provisional_number = (
+        f"{prefix}-{reservation['sequence_number']}/"
+        f"{organization.get('institution_code') or 'N.1.11'}/-/"
+        f"{selected_date.month:02d}/{selected_date.year}"
+    )
+    table_name = "lapinhar_reports" if document_type == "lapinhar" else "lapinsus_reports"
+    with get_db().cursor() as cursor:
+        cursor.execute(
+            f"""INSERT INTO {table_name}
+            (report_type,report_number,title,report_date,facts,source_name,analysis,recommendation,
+             recipient,sender_name,classification,category_id,issue_code,attachment,organization,
+             creator_position,creator_name,creator_rank_nip,auth_position,auth_name,auth_rank_nip,
+             information_spacing,sources_spacing,trends_spacing,suggestions_spacing,status,created_by)
+            VALUES (%s,%s,'',%s,'','','','',%s,'KASI INTELIJEN','RAHASIA',NULL,NULL,'-',%s,
+                    %s,%s,%s,%s,%s,%s,'1.5','1.5','1.5','1.5','draft',%s)""",
+            (
+                document_type, provisional_number, selected_date,
+                f"YTH. KEPALA {organization['organization_name']}", organization["organization_name"],
+                creator.get("position_name", ""), creator.get("full_name", ""),
+                creator.get("rank_nip", ""), kasi.get("position_name", ""),
+                kasi.get("full_name", ""), kasi.get("rank_nip", ""), session["user_id"],
+            ),
+        )
+        report_id = cursor.lastrowid
+        cursor.execute(
+            """UPDATE document_number_reservations
+               SET status='used',report_id=%s,used_at=CURRENT_TIMESTAMP
+               WHERE reservation_token=%s AND document_type=%s
+               AND created_by=%s AND status='reserved'""",
+            (report_id, reservation["reservation_token"], document_type, session["user_id"]),
+        )
+    return report_id
+
+
 @app.route("/lapinhar/create", methods=["GET", "POST"])
 @login_required
 def create_lapinhar():
+    if request.method == "GET":
+        if request.args.get("new") != "1":
+            existing_draft = fetch_one(
+                """SELECT id FROM lapinhar_reports
+                   WHERE created_by=%s AND status='draft'
+                   ORDER BY created_at DESC,id DESC LIMIT 1""",
+                (session["user_id"],),
+            )
+            if existing_draft:
+                return redirect(url_for("lapinhar", choose_draft=existing_draft["id"]))
+        reservation = reserve_lapinhar_number()
+        report_id = create_empty_report_draft("lapinhar", reservation)
+        return redirect(url_for("edit_lapinhar", report_id=report_id))
     if request.method == "POST":
         data = lapinhar_form_data()
         attachments = collect_attachments()
@@ -899,10 +3377,31 @@ def edit_lapinhar(report_id):
     if report is None:
         flash("Laporan tidak ditemukan atau tidak dapat Anda akses.", "error")
         return redirect(url_for("lapinhar"))
-    sequence_number = report_sequence_number(report["report_number"])
+    sequence_number = report_sequence_label(report["report_number"])
     if request.method == "POST":
         data = lapinhar_form_data()
-        submitted_sequence = report_sequence_number(request.form.get("report_number", ""))
+        submitted_sequence = report_sequence_label(request.form.get("report_number", ""))
+        try:
+            selected_report_date = date.fromisoformat(data["report_date"])
+        except (TypeError, ValueError):
+            selected_report_date = None
+        backdated = bool(
+            selected_report_date and report.get("report_date")
+            and selected_report_date < report["report_date"]
+        )
+        if backdated:
+            backdated_reservation = fetch_one(
+                """SELECT id,sequence_label FROM backdated_number_reservations
+                   WHERE reservation_token=%s AND document_type='lapinhar'
+                   AND report_id=%s AND report_date=%s AND created_by=%s""",
+                (request.form.get("backdated_reservation_token", ""), report_id,
+                 selected_report_date, session["user_id"]),
+            )
+            submitted_sequence = (
+                backdated_reservation["sequence_label"] if backdated_reservation else ""
+            )
+        else:
+            backdated_reservation = None
         data["report_number"] = compose_lapinhar_number(
             submitted_sequence or sequence_number, data["institution_code"], data["issue_code"], data["report_date"],
         )
@@ -914,7 +3413,14 @@ def edit_lapinhar(report_id):
         number_available, number_message = lapinhar_number_available(
             data["report_number"], report_id=report_id
         )
-        if (not data["report_number"] or not data["subject"] or not data["information"]
+        if backdated and not backdated_reservation:
+            flash("Nomor tanggal mundur belum dibooking. Pilih kembali tanggal laporan.", "error")
+        elif (data["report_acting_enabled"] and not all((
+                data["report_acting_type"],
+                data["report_acting_name"], data["report_acting_position"],
+                data["report_acting_nip"]))):
+            flash("Jenis, nama, jabatan, dan NIP PLT/PLH penandatangan wajib diisi.", "error")
+        elif (not data["report_number"] or not data["subject"] or not data["information"]
                 or not data["category_id"] or not data["issue_code"]):
             flash("Nomor permasalahan, kategori, perihal, dan informasi wajib diisi.", "error")
         elif not number_available:
@@ -926,8 +3432,13 @@ def edit_lapinhar(report_id):
                        source_name=%s, analysis=%s, recommendation=%s, recipient=%s, sender_name=%s,
                        classification='RAHASIA', category_id=%s, issue_code=%s, attachment=%s,
                        organization=%s, creator_position=%s, creator_name=%s, creator_rank_nip=%s,
-                       auth_position=%s, auth_name=%s, auth_rank_nip=%s, information_spacing='1.5',
-                       sources_spacing='1.5', trends_spacing='1.5', suggestions_spacing='1.5'
+                       auth_position=%s, auth_name=%s, auth_rank_nip=%s,
+                       use_scanned_signatures=%s,use_digital_stamp=%s,
+                       report_acting_type=%s,report_acting_name=%s,
+                       report_acting_position=%s,report_acting_nip=%s,
+                       information_spacing='1.5',
+                       sources_spacing='1.5', trends_spacing='1.5', suggestions_spacing='1.5',
+                       status='selesai'
                        WHERE id=%s""",
                     (data["report_number"], data["subject"], data["report_date"] or None,
                      data["information"], data["sources"], data["trends"], data["suggestions"],
@@ -935,7 +3446,10 @@ def edit_lapinhar(report_id):
                      attachment_label(len(attachments)) if attachments else report["attachment"],
                      data["organization"], data["creator_position"], data["creator_name"],
                      data["creator_rank_nip"], data["auth_position"], data["auth_name"],
-                     data["auth_rank_nip"], report_id),
+                     data["auth_rank_nip"], data["use_scanned_signatures"],
+                     data["use_digital_stamp"], data["report_acting_type"],
+                     data["report_acting_name"], data["report_acting_position"],
+                     data["report_acting_nip"], report_id),
                 )
                 reservation_token = request.form.get("number_reservation_token", "")
                 if reservation_token:
@@ -943,6 +3457,13 @@ def edit_lapinhar(report_id):
                         "UPDATE document_number_reservations SET status='used',report_id=%s,used_at=CURRENT_TIMESTAMP "
                         "WHERE reservation_token=%s AND document_type='lapinhar' AND created_by=%s AND status='reserved'",
                         (report_id, reservation_token, session["user_id"]),
+                    )
+            if backdated:
+                release_original_document_number(report_id, "lapinhar")
+                with get_db().cursor() as cursor:
+                    cursor.execute(
+                        "DELETE FROM backdated_number_reservations WHERE id=%s",
+                        (backdated_reservation["id"],),
                     )
             if attachments:
                 save_report_attachments(report_id, attachments)
@@ -1068,6 +3589,38 @@ def download_all_lapinhar_attachments(report_id):
                      mimetype="application/zip")
 
 
+@app.get("/lapinsus/<int:report_id>/attachments/download-all")
+@login_required
+def download_all_lapinsus_attachments(report_id):
+    report = accessible_lapinsus(report_id)
+    if report is None:
+        abort(404)
+    rows = fetch_all(
+        """SELECT attachment_group, sort_order, image_path FROM report_attachments
+           WHERE report_id=%s ORDER BY attachment_group, sort_order, id""",
+        (report_id,),
+    )
+    if not rows:
+        abort(404)
+    archive = BytesIO()
+    report_dir = (UPLOAD_DIR / str(report_id)).resolve()
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+        for row in rows:
+            source = (Path(__file__).resolve().parent / row["image_path"]).resolve()
+            if not source.is_relative_to(report_dir) or not source.is_file():
+                continue
+            extension = source.suffix.lower() or ".jpg"
+            archive_name = f"Lampiran-{row['attachment_group']}-Foto-{row['sort_order']}{extension}"
+            bundle.write(source, archive_name)
+    if not archive.getvalue():
+        abort(404)
+    archive.seek(0)
+    sequence = lapinsus_sequence_label(report["report_number"]) or report_id
+    return send_file(archive, as_attachment=True,
+                     download_name=f"Lampiran-RLIK-{sequence}.zip",
+                     mimetype="application/zip")
+
+
 @app.post("/lapinhar/<int:report_id>/delete")
 @login_required
 def delete_lapinhar(report_id):
@@ -1112,12 +3665,15 @@ def lapinsus_editor_context(report=None, number_reservation=None):
                                filename=Path(row["image_path"]).name),
                 "filename": Path(row["image_path"]).name,
             })
-        for code in ("kasi_intel", "kasubsi_1", "kasubsi_2"):
-            signer = signatories.get(code)
-            if signer and (signer.get("position_name") == report.get("creator_position")
-                           or (signer.get("full_name") or "").casefold() == (report.get("creator_name") or "").casefold()):
-                selected_signer = code
-                break
+        if report.get("report_acting_type"):
+            selected_signer = "kasi_intel"
+        else:
+            for code in ("kasi_intel", "kasubsi_1", "kasubsi_2"):
+                signer = signatories.get(code)
+                if signer and (signer.get("position_name") == report.get("creator_position")
+                               or (signer.get("full_name") or "").casefold() == (report.get("creator_name") or "").casefold()):
+                    selected_signer = code
+                    break
     return dict(
         active="lapinsus", document_kind="lapinsus", document_label="LAPINSUS",
         report_heading="LAPORAN INFORMASI KHUSUS", report_code="L. IN.2",
@@ -1163,6 +3719,9 @@ def convert_lapinhar_to_lapinsus(report_id):
     if source is None:
         flash("LAPINHAR tidak ditemukan atau tidak dapat Anda akses.", "error")
         return redirect(url_for("lapinhar"))
+    if source.get("status") == "draft":
+        flash("Lengkapi dan simpan LAPINHAR sebelum dijadikan LAPINSUS.", "warning")
+        return redirect(url_for("lapinhar"))
     existing = fetch_one("SELECT id FROM lapinsus_reports WHERE source_lapinhar_id=%s", (report_id,))
     if existing:
         flash("LAPINHAR tersebut sudah pernah dijadikan LAPINSUS.", "warning")
@@ -1207,6 +3766,19 @@ def convert_lapinhar_to_lapinsus(report_id):
 @app.route("/lapinsus/create", methods=["GET", "POST"])
 @login_required
 def create_lapinsus():
+    if request.method == "GET":
+        if request.args.get("new") != "1":
+            existing_draft = fetch_one(
+                """SELECT id FROM lapinsus_reports
+                   WHERE created_by=%s AND status='draft'
+                   ORDER BY created_at DESC,id DESC LIMIT 1""",
+                (session["user_id"],),
+            )
+            if existing_draft:
+                return redirect(url_for("lapinsus", choose_draft=existing_draft["id"]))
+        reservation = reserve_lapinsus_number()
+        report_id = create_empty_report_draft("lapinsus", reservation)
+        return redirect(url_for("edit_lapinsus", report_id=report_id))
     reservation = None
     if request.method == "POST":
         data = lapinhar_form_data()
@@ -1246,17 +3818,49 @@ def edit_lapinsus(report_id):
     if report is None:
         flash("LAPINSUS tidak ditemukan atau tidak dapat Anda akses.", "error")
         return redirect(url_for("lapinsus"))
-    sequence = lapinsus_sequence_number(report["report_number"])
+    sequence = lapinsus_sequence_label(report["report_number"])
     if request.method == "POST":
         data = lapinhar_form_data()
-        submitted_sequence = lapinsus_sequence_number(request.form.get("report_number", ""))
+        submitted_sequence = lapinsus_sequence_label(request.form.get("report_number", ""))
+        try:
+            selected_report_date = date.fromisoformat(data["report_date"])
+        except (TypeError, ValueError):
+            selected_report_date = None
+        backdated = bool(
+            selected_report_date and report.get("report_date")
+            and selected_report_date < report["report_date"]
+        )
+        if backdated:
+            backdated_reservation = fetch_one(
+                """SELECT id,sequence_label FROM backdated_number_reservations
+                   WHERE reservation_token=%s AND document_type='lapinsus'
+                   AND report_id=%s AND report_date=%s AND created_by=%s""",
+                (request.form.get("backdated_reservation_token", ""), report_id,
+                 selected_report_date, session["user_id"]),
+            )
+            submitted_sequence = (
+                backdated_reservation["sequence_label"] if backdated_reservation else ""
+            )
+        else:
+            backdated_reservation = None
         data["report_number"] = compose_lapinsus_number(
             submitted_sequence or sequence, data["institution_code"], data["issue_code"], data["report_date"])
         attachments = collect_attachments()
         old_files = existing_report_files(report_id) if attachments else []
         old_rows = fetch_all("SELECT id FROM report_attachments WHERE report_id=%s", (report_id,)) if attachments else []
         available, message = lapinsus_number_available(data["report_number"], report_id=report_id)
-        if not all((data["report_number"], data["subject"], data["information"], data["category_id"], data["issue_code"])):
+        if backdated and not backdated_reservation:
+            flash("Nomor tanggal mundur belum dibooking. Pilih kembali tanggal laporan.", "error")
+        elif (data["acting_officer_type"] and not all((
+                data["acting_officer_name"], data["acting_officer_rank"],
+                data["acting_officer_nip"]))):
+            flash("Nama, pangkat, dan NIP pejabat PLH/PLT wajib diisi.", "error")
+        elif (data["report_acting_enabled"] and not all((
+                data["report_acting_type"],
+                data["report_acting_name"], data["report_acting_position"],
+                data["report_acting_nip"]))):
+            flash("Jenis, nama, jabatan, dan NIP PLT/PLH penandatangan wajib diisi.", "error")
+        elif not all((data["report_number"], data["subject"], data["information"], data["category_id"], data["issue_code"])):
             flash("Nomor permasalahan, kategori, perihal, dan informasi wajib diisi.", "error")
         elif not available:
             flash(message, "error")
@@ -1267,13 +3871,27 @@ def edit_lapinsus(report_id):
                     analysis=%s,recommendation=%s,recipient=%s,sender_name=%s,classification='RAHASIA',
                     category_id=%s,issue_code=%s,attachment=%s,organization=%s,creator_position=%s,
                     creator_name=%s,creator_rank_nip=%s,auth_position=%s,auth_name=%s,auth_rank_nip=%s,
-                    information_spacing='1.5',sources_spacing='1.5',trends_spacing='1.5',suggestions_spacing='1.5'
+                    use_scanned_signatures=%s,use_digital_stamp=%s,letter_signature_type=%s,
+                    report_acting_type=%s,report_acting_name=%s,
+                    report_acting_position=%s,report_acting_nip=%s,
+                    letter_use_digital_stamp=%s,
+                    acting_officer_type=%s,acting_officer_name=%s,
+                    acting_officer_position=%s,acting_officer_rank=%s,acting_officer_nip=%s,
+                    information_spacing='1.5',sources_spacing='1.5',trends_spacing='1.5',suggestions_spacing='1.5',
+                    status='selesai'
                     WHERE id=%s""",
                     (data["report_number"], data["subject"], data["report_date"] or None, data["information"],
                      data["sources"], data["trends"], data["suggestions"], data["recipient"], data["sender"],
                      data["category_id"], data["issue_code"], attachment_label(len(attachments)) if attachments else report["attachment"],
                      data["organization"], data["creator_position"], data["creator_name"], data["creator_rank_nip"],
-                     data["auth_position"], data["auth_name"], data["auth_rank_nip"], report_id),
+                     data["auth_position"], data["auth_name"], data["auth_rank_nip"],
+                     data["use_scanned_signatures"], data["use_digital_stamp"],
+                     data["letter_signature_type"], data["report_acting_type"],
+                     data["report_acting_name"], data["report_acting_position"],
+                     data["report_acting_nip"], data["letter_use_digital_stamp"],
+                     data["acting_officer_type"], data["acting_officer_name"],
+                     data["acting_officer_position"], data["acting_officer_rank"],
+                     data["acting_officer_nip"], report_id),
                 )
                 reservation_token = request.form.get("number_reservation_token", "")
                 if reservation_token:
@@ -1281,6 +3899,13 @@ def edit_lapinsus(report_id):
                         "UPDATE document_number_reservations SET status='used',report_id=%s,used_at=CURRENT_TIMESTAMP "
                         "WHERE reservation_token=%s AND document_type='lapinsus' AND created_by=%s AND status='reserved'",
                         (report_id, reservation_token, session["user_id"]),
+                    )
+            if backdated:
+                release_original_document_number(report_id, "lapinsus")
+                with get_db().cursor() as cursor:
+                    cursor.execute(
+                        "DELETE FROM backdated_number_reservations WHERE id=%s",
+                        (backdated_reservation["id"],),
                     )
             if attachments:
                 save_report_attachments(report_id, attachments)
@@ -1345,6 +3970,7 @@ def upload_lapinsus_sipede(report_id):
     session_data = get_sipede_session_data(session["user_id"])
     if not session_data:
         return jsonify(message="Login SIPede diperlukan.", requires_sipede_login=True), 401
+    sipede_stage = "membuka form Surat Keluar"
     try:
         http_session = requests.Session()
         for cookie in session_data.get("cookies", []):
@@ -1403,11 +4029,13 @@ def upload_lapinsus_sipede(report_id):
         else:
             sipede_number = str(report.get("sipede_number") or "").strip()
         if not sipede_number or sipede_number == "-":
+            sipede_stage = "memeriksa nomor otomatis"
             auto_number_response = http_session.get(
                 f"{SIPEDE_BASE_URL}/suratkeluar/check-auto-number",
                 params={"surat": "23"}, headers=ajax_headers, timeout=30,
             )
             auto_number_response.raise_for_status()
+            sipede_stage = "mengambil nomor sequence surat"
             number_response = http_session.post(
                 f"{SIPEDE_BASE_URL}/getnosurat/cekno",
                 headers={**ajax_headers, "X-CSRF-TOKEN": csrf_token},
@@ -1425,6 +4053,7 @@ def upload_lapinsus_sipede(report_id):
             session[temporary_number_key] = sipede_number
             session.modified = True
 
+        sipede_stage = "mengambil daftar tujuan disposisi"
         destinations_response = http_session.get(
             f"{SIPEDE_BASE_URL}/suratkeluar/get-master-tujuan-disposisi",
             headers={**ajax_headers, "X-CSRF-TOKEN": csrf_token},
@@ -1467,24 +4096,28 @@ def upload_lapinsus_sipede(report_id):
             organization = fetch_one("SELECT * FROM organization_settings WHERE id=1") or {
                 "organization_name": "Kejaksaan Negeri Buleleng"
             }
-            submit_data = {
-                "_token": csrf_token,
-                "suratmasuk": "",
-                "nomor": sipede_number,
-                "tanggal": str(report.get("report_date") or date.today().isoformat()),
-                "jenis": "23",
-                "sifat": "R",
-                "kode_masalah": issue_code,
-                "tujuan": "Yth.\nKepala Kejaksaan Tinggi Bali\nDi - Denpasar",
-                "dari": str((kajari or {}).get("position_name") or
-                            f"Kepala {organization.get('organization_name', 'Kejaksaan Negeri Buleleng')}"),
-                "hal": str(report.get("title") or report.get("subject") or "LAPINSUS"),
-                "penandatangan": str(signatory_id),
-                "idSurat": "125",
-                "idSuratMasuk": "",
-                "tujuan_surat": ",".join(selected_destinations),
-                "submitModal": "ok",
-            }
+            submit_data = [
+                ("_token", csrf_token),
+                ("suratmasuk", ""),
+                ("nomor", sipede_number),
+                ("tanggal", str(report.get("report_date") or date.today().isoformat())),
+                ("jenis", "23"),
+                ("sifat", "R"),
+                ("kode_masalah", issue_code),
+                ("tujuan", "Yth.\nKepala Kejaksaan Tinggi Bali\nDi - Denpasar"),
+                ("dari", str((kajari or {}).get("position_name") or
+                             f"Kepala {organization.get('organization_name', 'Kejaksaan Negeri Buleleng')}")),
+                ("hal", str(report.get("title") or report.get("subject") or "LAPINSUS")),
+                ("penandatangan", str(signatory_id)),
+                ("idSurat", "125"),
+                ("idSuratMasuk", ""),
+                ("tujuan_surat", ",".join(selected_destinations)),
+                ("submitModal", "ok"),
+            ]
+            tembusan_field = "tembusan[]" if "tembusan[]" in create_context.get("field_names", []) else "tembusan"
+            for tembusan_id in sipede_tembusan_ids():
+                submit_data.append((tembusan_field, tembusan_id))
+            sipede_stage = "mengirim PDF dan data Surat Keluar"
             submit_response = http_session.post(
                 create_context.get("form_action") or f"{SIPEDE_BASE_URL}/suratkeluar",
                 headers={
@@ -1493,7 +4126,15 @@ def upload_lapinsus_sipede(report_id):
                     "Accept-Language": "id,en-US;q=0.9,en;q=0.8",
                     "Cache-Control": "max-age=0",
                     "Origin": SIPEDE_BASE_URL,
+                    "Priority": "u=0, i",
                     "Referer": SIPEDE_SURATKELUAR_CREATE_URL,
+                    "Sec-CH-UA": '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"',
+                    "Sec-CH-UA-Mobile": "?0",
+                    "Sec-CH-UA-Platform": '"Windows"',
+                    "Sec-Fetch-Dest": "document",
+                    "Sec-Fetch-Mode": "navigate",
+                    "Sec-Fetch-Site": "same-origin",
+                    "Sec-Fetch-User": "?1",
                     "Upgrade-Insecure-Requests": "1",
                     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                                    "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -1510,6 +4151,10 @@ def upload_lapinsus_sipede(report_id):
             error_node = submit_soup.select_one('.alert-danger, .invalid-feedback, .text-danger')
             if returned_form and urlparse(submit_response.url).path.rstrip("/").endswith("/create"):
                 error_message = error_node.get_text(" ", strip=True) if error_node else "SIPede belum menerima surat."
+                app.logger.warning(
+                    "SIPede menolak upload LAPINSUS %s: %s",
+                    report_id, error_message,
+                )
                 return jsonify(message=error_message), 422
             with get_db().cursor() as cursor:
                 cursor.execute(
@@ -1538,8 +4183,24 @@ def upload_lapinsus_sipede(report_id):
             destinations=destinations,
         ), 202
     except requests.RequestException as exc:
-        app.logger.warning("Form Surat Keluar SIPede gagal dibuka: %s", exc)
-        return jsonify(message="SIPede tidak dapat dihubungi. Silakan coba lagi."), 502
+        error_message = sipede_request_error_message(exc, sipede_stage)
+        app.logger.warning("%s", error_message)
+        response_status = getattr(getattr(exc, "response", None), "status_code", None)
+        if (sipede_stage == "membuka form Surat Keluar"
+                or response_status in {401, 403, 419}):
+            with get_db().cursor() as cursor:
+                cursor.execute(
+                    "UPDATE sipede_user_settings SET connected_at=NULL WHERE user_id=%s",
+                    (session["user_id"],),
+                )
+            return jsonify(
+                message="Sesi SIPede tidak aktif. Silakan login kembali.",
+                requires_sipede_login=True,
+            ), 401
+        return jsonify(message=error_message), 502
+    except Exception as exc:
+        app.logger.exception("Upload LAPINSUS ke SIPede gagal")
+        return jsonify(message=f"Upload LAPINSUS ke SIPede gagal: {exc}"), 500
 
 
 def rich_text_blocks(content):
@@ -1633,8 +4294,8 @@ def add_docx_label(document, label, value):
 def lapinhar_export_basename(report_number, report_date, subject):
     """Return a safe RLIH/RLIK export filename."""
     number_text = str(report_number or "")
-    is_lapinsus = number_text.startswith("R.LIK-")
-    sequence = lapinsus_sequence_number(number_text) if is_lapinsus else report_sequence_number(number_text)
+    is_lapinsus = number_text.startswith("R-LIK-")
+    sequence = lapinsus_sequence_label(number_text) if is_lapinsus else report_sequence_label(number_text)
     prefix = "RLIK" if is_lapinsus else "RLIH"
     try:
         selected_date = date.fromisoformat(str(report_date or ""))
@@ -1723,14 +4384,14 @@ def inteliz_signatory_value(report, soup, saved_options=None):
     return ""
 
 
-def save_refreshed_inteliz_session(user_id, session_data, http_session, csrf_token):
+def save_refreshed_inteliz_session(user_id, session_data, http_session, csrf_token, create_key="lapinhar_create"):
     session_data["cookies"] = [
         {"name": cookie.name, "value": cookie.value, "domain": cookie.domain,
          "path": cookie.path or "/", "expires": cookie.expires or -1,
          "secure": bool(cookie.secure), "httpOnly": bool(cookie.has_nonstandard_attr("HttpOnly"))}
         for cookie in http_session.cookies
     ]
-    session_data.setdefault("lapinhar_create", {})["csrf_token"] = csrf_token
+    session_data.setdefault(create_key, {})["csrf_token"] = csrf_token
     session_data["captured_at"] = int(time.time())
     encrypted = inteliz_credential_cipher().encrypt(
         json.dumps(session_data, ensure_ascii=False).encode("utf-8")
@@ -1742,12 +4403,27 @@ def save_refreshed_inteliz_session(user_id, session_data, http_session, csrf_tok
         )
 
 
+def extract_inteliz_csrf_token(soup, saved_context=None):
+    token = html_form_value(soup, "_token")
+    if token:
+        return token
+    meta = soup.select_one('meta[name="csrf-token"]')
+    if meta and meta.get("content"):
+        return meta.get("content", "").strip()
+    if saved_context:
+        return str(saved_context.get("csrf_token") or "").strip()
+    return ""
+
+
 @app.post("/lapinhar/<int:report_id>/sync-inteliz")
 @login_required
 def sync_lapinhar_inteliz(report_id):
     report = accessible_lapinhar(report_id)
     if report is None:
         flash("LAPINHAR tidak ditemukan atau tidak dapat Anda akses.", "error")
+        return redirect(url_for("lapinhar"))
+    if report.get("status") == "draft":
+        flash("Lengkapi dan simpan LAPINHAR sebelum sinkronisasi Inteliz.", "warning")
         return redirect(url_for("lapinhar"))
     if report["inteliz_status"] == "sudah":
         flash("LAPINHAR tersebut sudah tersinkron ke Inteliz.", "success")
@@ -1779,11 +4455,8 @@ def sync_lapinhar_inteliz(report_id):
             raise IntelizAuthenticationRequired("Sesi Inteliz sudah kedaluwarsa.")
         create_response.raise_for_status()
         soup = BeautifulSoup(create_response.text, "html.parser")
-        csrf_token = html_form_value(soup, "_token") or (
-            soup.select_one('meta[name="csrf-token"]').get("content", "")
-            if soup.select_one('meta[name="csrf-token"]') else ""
-        )
         saved_create = session_data.get("lapinhar_create", {})
+        csrf_token = extract_inteliz_csrf_token(soup, saved_create)
         id_satker = html_form_value(soup, "id_satker") or saved_create.get("id_satker", "")
         signatory = inteliz_signatory_value(report, soup, saved_create.get("signatory_options"))
         if not csrf_token or not id_satker or not signatory:
@@ -1828,7 +4501,7 @@ def sync_lapinhar_inteliz(report_id):
             validation = " ".join(node.get_text(" ", strip=True) for node in
                                   error_soup.select(".invalid-feedback, .alert-danger, .text-danger") if node.get_text(strip=True))
             raise RuntimeError(validation or "Inteliz belum menerima data LAPINHAR.")
-        save_refreshed_inteliz_session(report["created_by"], session_data, http_session, csrf_token)
+        save_refreshed_inteliz_session(report["created_by"], session_data, http_session, csrf_token, "lapinhar_create")
         with get_db().cursor() as cursor:
             cursor.execute("UPDATE lapinhar_reports SET inteliz_status='sudah' WHERE id=%s", (report_id,))
         flash("LAPINHAR berhasil disinkronkan ke Inteliz.", "success")
@@ -1847,6 +4520,118 @@ def sync_lapinhar_inteliz(report_id):
         app.logger.warning("Sinkron Inteliz laporan %s gagal: %s", report_id, exc)
         flash(f"Sinkron Inteliz gagal: {exc}", "error")
     return redirect(url_for("lapinhar"))
+
+
+@app.post("/lapinsus/<int:report_id>/sync-inteliz")
+@login_required
+def sync_lapinsus_inteliz(report_id):
+    report = accessible_lapinsus(report_id)
+    if report is None:
+        flash("LAPINSUS tidak ditemukan atau tidak dapat Anda akses.", "error")
+        return redirect(url_for("lapinsus"))
+    if report.get("status") == "draft":
+        flash("Lengkapi dan simpan LAPINSUS sebelum sinkronisasi Inteliz.", "warning")
+        return redirect(url_for("lapinsus"))
+    if report["inteliz_status"] == "sudah":
+        flash("LAPINSUS tersebut sudah tersinkron ke Inteliz.", "success")
+        return redirect(url_for("lapinsus"))
+
+    session_data = get_inteliz_session_data(report["created_by"])
+    if not session_data or not session_data.get("cookies"):
+        flash("Sesi Inteliz pembuat laporan belum tersedia. Hubungkan Inteliz terlebih dahulu.", "error")
+        if report["created_by"] == session["user_id"]:
+            return redirect(url_for("lapinsus", connect_inteliz=1))
+        return redirect(url_for("lapinsus"))
+
+    http_session = requests.Session()
+    for cookie in session_data["cookies"]:
+        if cookie.get("expires", -1) not in (-1, None) and cookie["expires"] < time.time():
+            continue
+        http_session.cookies.set(
+            cookie["name"], cookie["value"],
+            domain=cookie.get("domain") or "inteliz.kejaksaan.go.id",
+            path=cookie.get("path") or "/",
+        )
+    headers = {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "id,en-US;q=0.9,en;q=0.8",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+    }
+    try:
+        create_response = http_session.get(INTELIZ_LAPINSUS_CREATE_URL, headers=headers, timeout=45)
+        if "/login" in create_response.url.lower():
+            raise IntelizAuthenticationRequired("Sesi Inteliz sudah kedaluwarsa.")
+        create_response.raise_for_status()
+        soup = BeautifulSoup(create_response.text, "html.parser")
+        saved_create = session_data.get("lapinsus_create", {})
+        csrf_token = extract_inteliz_csrf_token(soup, saved_create)
+        id_satker = html_form_value(soup, "id_satker") or saved_create.get("id_satker", "")
+        signatory = inteliz_signatory_value(report, soup, saved_create.get("signatory_options"))
+        if not csrf_token or not id_satker or not signatory:
+            missing = []
+            if not csrf_token:
+                missing.append("token CSRF")
+            if not id_satker:
+                missing.append("ID satker")
+            if not signatory:
+                missing.append("penandatangan")
+            app.logger.warning("Metadata create Inteliz LAPINSUS %s belum lengkap: %s; url=%s; fields=%s",
+                               report_id, ", ".join(missing), create_response.url,
+                               sorted({field.get("name") for field in soup.select("[name]") if field.get("name")}))
+            raise RuntimeError(
+                f"Data form Inteliz belum lengkap: {', '.join(missing)}. Cookie login tetap disimpan."
+            )
+
+        fields = {
+            "_token": csrf_token,
+            "id_satker": str(id_satker),
+            "kategori_laporan": str(report["category_id"] or ""),
+            "nomor_surat": report["report_number"] or "",
+            "tgl": report["report_date"].isoformat() if report["report_date"] else "",
+            "informasi_yang_diperoleh": report["facts"] or "",
+            "sumber_informasi": report["source_name"] or "",
+            "perkembangan": report["analysis"] or "",
+            "saran_tindak": report["recommendation"] or "",
+            "penandatangan": signatory,
+        }
+        if not all(fields.values()):
+            raise RuntimeError("Data LAPINSUS belum lengkap untuk dikirim ke Inteliz.")
+        upload_response = http_session.post(
+            "https://inteliz.kejaksaan.go.id/lapinsus",
+            files={name: (None, value) for name, value in fields.items()},
+            headers={**headers, "Referer": INTELIZ_LAPINSUS_CREATE_URL}, timeout=60,
+        )
+        if upload_response.status_code == 419 or "/login" in upload_response.url.lower():
+            raise IntelizAuthenticationRequired("Sesi atau token Inteliz kedaluwarsa.")
+        upload_response.raise_for_status()
+        if urlparse(upload_response.url).path.rstrip("/") != "/lapinsus":
+            error_soup = BeautifulSoup(upload_response.text, "html.parser")
+            validation = " ".join(
+                node.get_text(" ", strip=True)
+                for node in error_soup.select(".invalid-feedback, .alert-danger, .text-danger")
+                if node.get_text(strip=True)
+            )
+            raise RuntimeError(validation or "Inteliz belum menerima data LAPINSUS.")
+        save_refreshed_inteliz_session(report["created_by"], session_data, http_session, csrf_token, "lapinsus_create")
+        with get_db().cursor() as cursor:
+            cursor.execute("UPDATE lapinsus_reports SET inteliz_status='sudah' WHERE id=%s", (report_id,))
+        flash("LAPINSUS berhasil disinkronkan ke Inteliz.", "success")
+    except IntelizAuthenticationRequired as exc:
+        with get_db().cursor() as cursor:
+            cursor.execute(
+                "UPDATE inteliz_user_settings SET connected_at=NULL WHERE user_id=%s",
+                (report["created_by"],),
+            )
+        flash(f"{exc} Silakan selesaikan login Inteliz pada popup.", "error")
+        if report["created_by"] == session["user_id"]:
+            return redirect(url_for("lapinsus", connect_inteliz=1))
+        flash("Pembuat LAPINSUS harus menghubungkan ulang akun Inteliz miliknya.", "error")
+        return redirect(url_for("lapinsus"))
+    except (requests.RequestException, RuntimeError) as exc:
+        app.logger.warning("Sinkron Inteliz LAPINSUS %s gagal: %s", report_id, exc)
+        flash(f"Sinkron Inteliz gagal: {exc}", "error")
+    return redirect(url_for("lapinsus"))
 
 
 def read_inteliz_create_context(page):
@@ -2023,16 +4808,39 @@ def run_inteliz_auth(auth_id, user_id, credentials):
             if not cookie_count:
                 raise RuntimeError("Dashboard terbuka, tetapi cookie Inteliz tidak ditemukan.")
             update_inteliz_auth(auth_id, status="loading", captcha=None,
-                                message="Cookie tersimpan. Membaca formulir LAPINHAR Inteliz…")
-            create_context = None
+                                message="Cookie tersimpan. Membaca formulir Inteliz…")
             try:
                 page.goto(INTELIZ_LAPINHAR_CREATE_URL, wait_until="domcontentloaded", timeout=60000)
                 page.wait_for_timeout(1200)
-                if urlparse(page.url).path.rstrip("/") == "/lapinhar/create":
-                    create_context = read_inteliz_create_context(page)
-                    persist_inteliz_browser_session(user_id, context, page, create_context)
+                lapinhar_context = read_inteliz_create_context(page) if urlparse(page.url).path.rstrip("/") == "/lapinhar/create" else None
+
+                lapinsus_context = None
+                page.goto(INTELIZ_LAPINSUS_CREATE_URL, wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(1200)
+                if urlparse(page.url).path.rstrip("/") == "/lapinsus/create":
+                    lapinsus_context = read_inteliz_create_context(page)
+
+                cookie_payload = {
+                    "cookies": context.cookies(["https://inteliz.kejaksaan.go.id"]),
+                    "local_storage": page.evaluate(
+                        "Object.fromEntries(Array.from({length: localStorage.length}, (_, i) => "
+                        "[localStorage.key(i), localStorage.getItem(localStorage.key(i))]))"
+                    ),
+                    "lapinhar_create": lapinhar_context or {},
+                    "lapinsus_create": lapinsus_context or {},
+                    "captured_url": page.url,
+                    "captured_at": int(time.time()),
+                }
+                encrypted = inteliz_credential_cipher().encrypt(
+                    json.dumps(cookie_payload, ensure_ascii=False).encode("utf-8")
+                ).decode("ascii")
+                with get_db().cursor() as cursor:
+                    cursor.execute(
+                        "UPDATE inteliz_user_settings SET session_data_encrypted=%s WHERE user_id=%s",
+                        (encrypted, user_id),
+                    )
             except Exception as form_exc:
-                app.logger.warning("Cookie Inteliz tersimpan, metadata form belum terbaca: %s", form_exc)
+                app.logger.warning("Cookie Inteliz tersimpan, metadata form belum terbaca lengkap: %s", form_exc)
             update_inteliz_auth(auth_id, status="success", captcha=None,
                                 message="Inteliz berhasil terhubung. Cookie telah disimpan terenkripsi.")
     except Exception as exc:
@@ -2135,6 +4943,55 @@ def sipede_issue_code_value(create_context, report_issue_code):
         if normalized_target == normalized_value or normalized_target in normalized_label:
             return value
     return None
+
+
+def sipede_tembusan_text(report):
+    lines = [
+        "Yth. Wakil Kepala Kejaksaan Tinggi Bali;",
+        "Yth. Asisten Bidang Intelijen Kejaksaan Tinggi Bali;",
+        "Yth. Asisten Bidang Pengawasan Kejaksaan Tinggi Bali;",
+    ]
+    if report.get("acting_officer_type"):
+        lines.append("Yth. Kepala Kejaksaan Negeri Buleleng (Sebagai Laporan);")
+    lines.append("Arsip.")
+    return "\n".join(lines)
+
+
+def sipede_tembusan_ids():
+    return ["603", "3309", "1230"]
+
+
+def sipede_request_error_message(error, stage):
+    response = getattr(error, "response", None)
+    if response is None:
+        detail = str(error).strip()
+        if isinstance(error, requests.Timeout):
+            detail = "waktu tunggu koneksi habis"
+        elif isinstance(error, requests.ConnectionError):
+            detail = "koneksi dari server terputus atau ditolak"
+        return f"SIPede gagal saat {stage}: {detail or 'koneksi tidak tersedia'}."
+
+    status = response.status_code
+    detail = ""
+    content_type = (response.headers.get("Content-Type") or "").lower()
+    if "html" in content_type:
+        soup = BeautifulSoup(response.text or "", "html.parser")
+        error_node = soup.select_one(
+            ".alert-danger, .alert-error, .invalid-feedback, .text-danger, "
+            ".swal2-html-container, main"
+        )
+        if error_node:
+            detail = error_node.get_text(" ", strip=True)
+        elif soup.title:
+            detail = soup.title.get_text(" ", strip=True)
+    elif response.text:
+        detail = response.text.strip()
+
+    detail = re.sub(r"\s+", " ", detail)[:350]
+    message = f"SIPede gagal saat {stage} (HTTP {status})"
+    if detail:
+        message += f": {detail}"
+    return message + "."
 
 
 def save_refreshed_sipede_session(user_id, session_data, http_session, create_context):
@@ -2241,9 +5098,9 @@ def run_sipede_auth(auth_id, user_id, credentials):
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(
                 executable_path=str(CHROME_EXECUTABLE),
-                headless=os.getenv("SIPEDE_BROWSER_HEADLESS", "0") == "1",
+                headless=os.getenv("SIPEDE_BROWSER_HEADLESS", "1") == "1",
                 slow_mo=int(os.getenv("SIPEDE_BROWSER_SLOW_MO", "250")),
-                args=["--disable-blink-features=AutomationControlled"],
+                args=["--incognito", "--disable-blink-features=AutomationControlled"],
             )
             context = browser.new_context(viewport={"width": 1280, "height": 900}, locale="id-ID")
             page = context.new_page()
@@ -2644,6 +5501,121 @@ def export_lapinhar_preview_pdf():
             page = browser.new_page(viewport={"width": 816, "height": 1248})
             page.set_content(printable_html, wait_until="networkidle")
             page.emulate_media(media="print")
+            page.evaluate(
+                """() => {
+                const group = document.querySelector("[data-report-preview-group]");
+                if (!group) return;
+                const pages = () => Array.from(group.querySelectorAll("[data-report-page]"));
+                const lockPage = (page) => {
+                  page.style.width = "8.5in";
+                  page.style.height = "13in";
+                  page.style.minHeight = "13in";
+                  page.style.maxHeight = "13in";
+                  page.style.boxSizing = "border-box";
+                  page.style.overflow = "hidden";
+                  page.style.display = "flex";
+                  page.style.flexDirection = "column";
+                };
+                pages().forEach(lockPage);
+                const pageSafeBottom = (page, extraReserve = 0) => {
+                  const pageBox = page.getBoundingClientRect();
+                  const pageStyle = window.getComputedStyle(page);
+                  const paddingBottom = Number.parseFloat(pageStyle.paddingBottom) || 0;
+                  const footerReserve = Math.max(paddingBottom, 96);
+                  return pageBox.bottom - footerReserve - extraReserve;
+                };
+                const deepestFlowBottom = (page) => {
+                  const flowRoots = Array.from(page.children).filter((child) => {
+                    const style = window.getComputedStyle(child);
+                    return style.position !== "absolute" && !child.hidden;
+                  });
+                  let bottom = 0;
+                  flowRoots.forEach((root) => {
+                    [root, ...Array.from(root.querySelectorAll("*"))].forEach((node) => {
+                      const style = window.getComputedStyle(node);
+                      if (style.display === "none" || style.visibility === "hidden") return;
+                      const rect = node.getBoundingClientRect();
+                      if (rect.height > 0) bottom = Math.max(bottom, rect.bottom);
+                    });
+                  });
+                  return bottom;
+                };
+                const overflows = (page, extraReserve = 0) =>
+                  page.scrollHeight > page.clientHeight + 2 ||
+                  deepestFlowBottom(page) > pageSafeBottom(page, extraReserve);
+                const skeleton = pages()[0].cloneNode(true);
+                skeleton.querySelector(".official-body").innerHTML = "";
+                skeleton.querySelector(".signature-grid")?.remove();
+                skeleton.querySelector(".report-code")?.remove();
+                skeleton.querySelector(".document-header")?.remove();
+                skeleton.classList.add("continuation-page");
+                const ensureNext = (page) => {
+                  let next = page.nextElementSibling?.matches?.("[data-report-page]")
+                    ? page.nextElementSibling
+                    : null;
+                  if (!next) {
+                    next = skeleton.cloneNode(true);
+                    group.insertBefore(next, page.nextSibling);
+                    lockPage(next);
+                  }
+                  return next;
+                };
+                const prependBlock = (body, title, block) => {
+                  let section = body.querySelector(".paginated-section");
+                  if (!section || section.querySelector("h3")?.textContent !== title) {
+                    section = document.createElement("section");
+                    section.className = "paginated-section";
+                    const heading = document.createElement("h3");
+                    heading.textContent = title;
+                    section.appendChild(heading);
+                    body.insertBefore(section, body.firstChild);
+                  }
+                  const heading = section.querySelector("h3");
+                  section.insertBefore(block, heading ? heading.nextSibling : section.firstChild);
+                };
+                const countContentBlocks = (page) =>
+                  page.querySelectorAll(".official-body .paginated-section > p, .official-body .paginated-section > ol, .official-body .paginated-section > ul").length;
+                const moveLastMovable = (page) => {
+                  const signature = page.querySelector(":scope > .signature-grid");
+                  if (signature) {
+                    ensureNext(page).appendChild(signature);
+                    return true;
+                  }
+                  if (countContentBlocks(page) <= 1) return false;
+                  const sections = Array.from(page.querySelectorAll(".official-body .paginated-section"));
+                  const section = sections.reverse().find((candidate) =>
+                    candidate.querySelector(":scope > p, :scope > ol, :scope > ul")
+                  );
+                  if (!section) return false;
+                  const blocks = Array.from(section.querySelectorAll(":scope > p, :scope > ol, :scope > ul"));
+                  const block = blocks[blocks.length - 1];
+                  const title = section.querySelector("h3")?.textContent || "";
+                  block.remove();
+                  if (!section.querySelector(":scope > p, :scope > ol, :scope > ul")) section.remove();
+                  prependBlock(ensureNext(page).querySelector(".official-body"), title, block);
+                  return true;
+                };
+                let guard = 0;
+                while (guard++ < 240) {
+                  let changed = false;
+                  for (const page of pages()) {
+                    if (overflows(page, page.querySelector(":scope > .signature-grid") ? 18 : 0)) {
+                      changed = moveLastMovable(page) || changed;
+                    }
+                  }
+                  if (!changed) break;
+                }
+                const renderedSectionTitles = new Set();
+                pages().forEach((page) => {
+                  page.querySelectorAll(".official-body .paginated-section > h3").forEach((heading) => {
+                    const title = heading.textContent.trim().replace(/\\s+/g, " ").toUpperCase();
+                    if (renderedSectionTitles.has(title)) heading.remove();
+                    else renderedSectionTitles.add(title);
+                  });
+                });
+                pages().forEach((page, index) => { page.dataset.pageNumber = String(index + 1); });
+              }"""
+            )
             pdf_bytes = page.pdf(
                 width="8.5in", height="13in", print_background=True,
                 prefer_css_page_size=True,
@@ -2667,7 +5639,7 @@ def users():
         full_name = request.form.get("full_name", "").strip()
         password = request.form.get("password", "")
         role = request.form.get("role", "user")
-        if not username or not full_name or len(password) < 6 or role not in {"admin", "user"}:
+        if not username or not full_name or len(password) < 6 or role not in {"admin", "user", "mahasiswa"}:
             flash("Lengkapi data. Kata sandi minimal 6 karakter.", "error")
         elif fetch_one("SELECT id FROM users WHERE username = %s", (username,)):
             flash("Username sudah digunakan.", "error")
@@ -2679,7 +5651,104 @@ def users():
                 )
             flash("Pengguna baru berhasil dibuat.", "success")
             return redirect(url_for("users"))
-    return render_template("users.html", users=fetch_all("SELECT id, username, full_name, role, is_active, created_at FROM users ORDER BY created_at DESC"), active="users")
+    return render_template("users.html", users=fetch_all("SELECT id, username, full_name, role, is_active, profile_photo, created_at FROM users ORDER BY created_at DESC"), active="users")
+
+
+@app.get("/users/<int:user_id>/avatar")
+@login_required
+def user_avatar(user_id):
+    user = fetch_one("SELECT profile_photo FROM users WHERE id=%s", (user_id,))
+    if not user or not user.get("profile_photo"):
+        abort(404)
+    return send_from_directory(USER_AVATAR_UPLOAD_DIR, user["profile_photo"], max_age=0)
+
+
+@app.route("/profile", methods=["GET", "POST"])
+@login_required
+def profile_settings():
+    user = fetch_one("SELECT id,username,full_name,profile_photo FROM users WHERE id=%s", (session["user_id"],))
+    if user is None:
+        abort(404)
+    if request.method == "POST":
+        full_name = request.form.get("full_name", "").strip()
+        current_password = request.form.get("current_password", "")
+        new_password = request.form.get("new_password", "")
+        confirm_password = request.form.get("confirm_password", "")
+        try:
+            profile_photo = save_user_profile_photo(request.files.get("profile_photo"), user.get("profile_photo"))
+        except ValueError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("profile_settings"))
+        if not full_name:
+            flash("Nama pengguna wajib diisi.", "error")
+        elif new_password and len(new_password) < 6:
+            flash("Password baru minimal 6 karakter.", "error")
+        elif new_password and new_password != confirm_password:
+            flash("Konfirmasi password tidak sama.", "error")
+        elif new_password:
+            current = fetch_one("SELECT password_hash FROM users WHERE id=%s", (session["user_id"],))
+            if not check_password_hash(current["password_hash"], current_password):
+                flash("Password lama tidak sesuai.", "error")
+                return redirect(url_for("profile_settings"))
+            with get_db().cursor() as cursor:
+                cursor.execute(
+                    "UPDATE users SET full_name=%s, profile_photo=%s, password_hash=%s WHERE id=%s",
+                    (full_name, profile_photo, generate_password_hash(new_password), session["user_id"]),
+                )
+            session["full_name"] = full_name
+            session["profile_photo"] = profile_photo
+            flash("Profil dan password berhasil diperbarui.", "success")
+            return redirect(url_for("profile_settings"))
+        else:
+            with get_db().cursor() as cursor:
+                cursor.execute(
+                    "UPDATE users SET full_name=%s, profile_photo=%s WHERE id=%s",
+                    (full_name, profile_photo, session["user_id"]),
+                )
+            session["full_name"] = full_name
+            session["profile_photo"] = profile_photo
+            flash("Profil berhasil diperbarui.", "success")
+            return redirect(url_for("profile_settings"))
+    return render_template("profile_settings.html", active="profile", user=user)
+
+
+@app.post("/users/<int:user_id>/update-profile")
+@admin_required
+def update_user_profile_admin(user_id):
+    user = fetch_one("SELECT id,full_name,profile_photo FROM users WHERE id=%s", (user_id,))
+    if user is None:
+        abort(404)
+    full_name = request.form.get("full_name", "").strip()
+    new_password = request.form.get("new_password", "")
+    confirm_password = request.form.get("confirm_password", "")
+    try:
+        profile_photo = save_user_profile_photo(request.files.get("profile_photo"), user.get("profile_photo"))
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("users"))
+    if not full_name:
+        flash("Nama pengguna wajib diisi.", "error")
+    elif new_password and len(new_password) < 6:
+        flash("Password baru minimal 6 karakter.", "error")
+    elif new_password and new_password != confirm_password:
+        flash("Konfirmasi password tidak sama.", "error")
+    else:
+        with get_db().cursor() as cursor:
+            if new_password:
+                cursor.execute(
+                    "UPDATE users SET full_name=%s, profile_photo=%s, password_hash=%s WHERE id=%s",
+                    (full_name, profile_photo, generate_password_hash(new_password), user_id),
+                )
+            else:
+                cursor.execute(
+                    "UPDATE users SET full_name=%s, profile_photo=%s WHERE id=%s",
+                    (full_name, profile_photo, user_id),
+                )
+        if user_id == session["user_id"]:
+            session["full_name"] = full_name
+            session["profile_photo"] = profile_photo
+        flash("Profil pengguna berhasil diperbarui.", "success")
+    return redirect(url_for("users"))
 
 
 @app.post("/users/<int:user_id>/toggle-active")
@@ -3021,19 +6090,61 @@ def signatory_settings():
             full_name = request.form.get("full_name", "").strip()
             rank_nip = request.form.get("rank_nip", "").strip()
             use_tte = 1 if code == "kajari" and request.form.get("use_tte") == "1" else 0
+            current = fetch_one(
+                "SELECT signature_image FROM signatories WHERE position_code=%s", (code,)
+            )
+            signature_image = current["signature_image"] if current else None
+            uploaded_signature = request.files.get("signature_image")
+            remove_signature = request.form.get("remove_signature") == "1"
             if not position_name or not full_name or not rank_nip:
                 flash("Seluruh data penandatangan wajib diisi.", "error")
+            elif (uploaded_signature and uploaded_signature.filename
+                  and uploaded_signature.mimetype not in ALLOWED_IMAGE_TYPES):
+                flash("Scan tanda tangan harus berupa JPG, PNG, atau WebP.", "error")
             else:
+                old_signature = signature_image
+                if remove_signature:
+                    signature_image = None
+                if uploaded_signature and uploaded_signature.filename:
+                    extension = {
+                        "image/jpeg": ".jpg",
+                        "image/png": ".png",
+                        "image/webp": ".webp",
+                    }[uploaded_signature.mimetype]
+                    SIGNATORY_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+                    signature_image = f"{code}_{uuid.uuid4().hex[:12]}{extension}"
+                    uploaded_signature.save(SIGNATORY_UPLOAD_DIR / signature_image)
                 with get_db().cursor() as cursor:
                     cursor.execute(
-                        """UPDATE signatories SET position_name = %s, full_name = %s, rank_nip = %s, use_tte = %s,
+                        """UPDATE signatories SET position_name = %s, full_name = %s, rank_nip = %s,
+                           use_tte = %s, signature_image = %s,
                            updated_at = CURRENT_TIMESTAMP WHERE position_code = %s""",
-                        (position_name, full_name, rank_nip, use_tte, code),
+                        (position_name, full_name, rank_nip, use_tte, signature_image, code),
                     )
+                if old_signature and old_signature != signature_image:
+                    old_path = (SIGNATORY_UPLOAD_DIR / old_signature).resolve()
+                    if old_path.parent == SIGNATORY_UPLOAD_DIR.resolve() and old_path.is_file():
+                        try:
+                            old_path.unlink()
+                        except PermissionError:
+                            pass
                 flash("Data penandatangan berhasil diperbarui.", "success")
                 return redirect(url_for("signatory_settings"))
     rows = fetch_all("SELECT * FROM signatories ORDER BY FIELD(position_code, 'kajari', 'kasi_intel', 'kasubsi_1', 'kasubsi_2')")
     return render_template("signatory_settings.html", signatories=rows, active="signatories")
+
+
+@app.get("/settings/signatories/<position_code>/signature")
+@login_required
+def signatory_signature_file(position_code):
+    if position_code not in {"kajari", "kasi_intel", "kasubsi_1", "kasubsi_2"}:
+        abort(404)
+    signer = fetch_one(
+        "SELECT signature_image FROM signatories WHERE position_code=%s", (position_code,)
+    )
+    if not signer or not signer["signature_image"]:
+        abort(404)
+    return send_from_directory(SIGNATORY_UPLOAD_DIR, signer["signature_image"], max_age=0)
 
 
 @app.route("/settings/organization", methods=["GET", "POST"])
@@ -3045,23 +6156,62 @@ def organization_settings():
         address = request.form.get("address", "").strip()
         phone = request.form.get("phone", "").strip()
         website = request.form.get("website", "").strip()
+        current = fetch_one("SELECT digital_stamp FROM organization_settings WHERE id=1")
+        digital_stamp = current["digital_stamp"] if current else None
+        uploaded_stamp = request.files.get("digital_stamp")
+        remove_stamp = request.form.get("remove_digital_stamp") == "1"
         if not all((organization_name, institution_code, address, phone, website)):
             flash("Seluruh data instansi wajib diisi.", "error")
+        elif (uploaded_stamp and uploaded_stamp.filename
+              and uploaded_stamp.mimetype not in ALLOWED_IMAGE_TYPES):
+            flash("Cap digital harus berupa JPG, PNG, atau WebP.", "error")
         else:
+            old_stamp = digital_stamp
+            if remove_stamp:
+                digital_stamp = None
+            if uploaded_stamp and uploaded_stamp.filename:
+                extension = {
+                    "image/jpeg": ".jpg",
+                    "image/png": ".png",
+                    "image/webp": ".webp",
+                }[uploaded_stamp.mimetype]
+                ORGANIZATION_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+                digital_stamp = f"cap_{uuid.uuid4().hex[:12]}{extension}"
+                uploaded_stamp.save(ORGANIZATION_UPLOAD_DIR / digital_stamp)
             with get_db().cursor() as cursor:
                 cursor.execute(
-                    """INSERT INTO organization_settings (id, organization_name, institution_code, address, phone, website)
-                       VALUES (1, %s, %s, %s, %s, %s)
+                    """INSERT INTO organization_settings
+                       (id, organization_name, institution_code, address, phone, website, digital_stamp)
+                       VALUES (1, %s, %s, %s, %s, %s, %s)
                        ON DUPLICATE KEY UPDATE organization_name = VALUES(organization_name),
                        institution_code = VALUES(institution_code), address = VALUES(address),
                        phone = VALUES(phone), website = VALUES(website),
+                       digital_stamp = VALUES(digital_stamp),
                        updated_at = CURRENT_TIMESTAMP""",
-                    (organization_name, institution_code, address, phone, website),
+                    (organization_name, institution_code, address, phone, website, digital_stamp),
                 )
+            if old_stamp and old_stamp != digital_stamp:
+                old_path = (ORGANIZATION_UPLOAD_DIR / old_stamp).resolve()
+                if old_path.parent == ORGANIZATION_UPLOAD_DIR.resolve() and old_path.is_file():
+                    try:
+                        old_path.unlink()
+                    except PermissionError:
+                        pass
             flash("Data instansi berhasil diperbarui.", "success")
             return redirect(url_for("organization_settings"))
     organization = fetch_one("SELECT * FROM organization_settings WHERE id = 1")
     return render_template("organization_settings.html", organization=organization, active="organization")
+
+
+@app.get("/settings/organization/digital-stamp")
+@login_required
+def organization_digital_stamp_file():
+    organization = fetch_one("SELECT digital_stamp FROM organization_settings WHERE id=1")
+    if not organization or not organization["digital_stamp"]:
+        abort(404)
+    return send_from_directory(
+        ORGANIZATION_UPLOAD_DIR, organization["digital_stamp"], max_age=0
+    )
 
 
 @app.post("/logout")

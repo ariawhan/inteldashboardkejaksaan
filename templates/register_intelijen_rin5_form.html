@@ -1,0 +1,58 @@
+{% extends "app_layout.html" %}
+{% block title %}{{ form_title }} - IndraOne{% endblock %}
+{% block page_title %}{{ form_title }}{% endblock %}
+{% block app_content %}
+<section class="editor-heading">
+  <div><p class="section-kicker">REGISTER INTELIJEN</p><h1>{{ form_title }}</h1><p>{{ form_description }}</p></div>
+  <a class="back-link" href="{{ url_for('register_intelijen_rin5') }}">Kembali</a>
+</section>
+
+<form method="post" class="register-intel-form">
+  <section class="content-card register-form-card">
+    <div class="form-section-title"><span>05</span><div><strong>Data Register R.IN.5</strong><small>Catat produk intelijen beserta nomor, tanggal, bidang, disposisi, dan keterangan.</small></div></div>
+    <div class="form-grid">
+      <label>
+        <span>Nama Satker</span>
+        <input type="text" value="{{ data.satker_name }}" readonly class="readonly-field">
+      </label>
+      <label>
+        <span>Jenis Produk Intelijen</span>
+        <input type="text" name="intelligence_product_type" value="{{ data.intelligence_product_type }}" placeholder="Contoh: LAPINHAR / LAPINSUS / Telaahan Intelijen" required>
+      </label>
+      <label>
+        <span>Nomor Produk Intelijen</span>
+        <input type="text" name="intelligence_product_number" value="{{ data.intelligence_product_number }}" placeholder="Nomor produk intelijen" required>
+      </label>
+      <label>
+        <span>Tanggal Produk Intelijen</span>
+        <input type="date" name="intelligence_product_date" value="{{ data.intelligence_product_date }}" required>
+      </label>
+      <label>
+        <span>Subdit/Seksi/Subseksi</span>
+        <select name="field_code" required>
+          <option value="">--- Pilih Subdit/Seksi/Subseksi ---</option>
+          {% for code, label in issue_code_labels.items() %}
+          <option value="{{ code }}" {{ 'selected' if data.field_code == code else '' }}>{{ code }} - {{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="full">
+        <span>Perihal</span>
+        <textarea name="subject" rows="4" required>{{ data.subject }}</textarea>
+      </label>
+      <label class="full">
+        <span>Disposisi Pimpinan</span>
+        <textarea name="leader_disposition" rows="4">{{ data.leader_disposition }}</textarea>
+      </label>
+      <label class="full">
+        <span>Keterangan</span>
+        <input type="text" name="remarks" value="{{ data.remarks }}" placeholder="Contoh: Arsip">
+      </label>
+    </div>
+  </section>
+  <div class="editor-actions register-form-actions">
+    <button type="submit" class="primary-button">{{ 'Simpan Perubahan' if entry else 'Simpan' }}</button>
+    <a class="outline-action" href="{{ url_for('register_intelijen_rin5') }}">Batal</a>
+  </div>
+</form>
+{% endblock %}

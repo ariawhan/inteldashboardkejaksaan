@@ -13,6 +13,7 @@ uploads/
 playwright/.auth/
 browser-data/
 user-data-dir/
+tmp_pdf_pages/
 *.log
 flask-server*.log
 *.sqlite

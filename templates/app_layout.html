@@ -1,39 +1,48 @@
 {% extends "base.html" %}
+{% block body_class %}role-{{ session.role }}{% endblock %}
 {% block content %}
 <div class="app-shell">
   <aside class="sidebar" id="sidebar">
-    <a class="sidebar-brand" href="{{ url_for('dashboard') }}">
-      <span class="brand-mark"><svg viewBox="0 0 48 48"><path d="M24 4 41 14v20L24 44 7 34V14L24 4Z"/><path d="m16 25 5 5 11-13"/></svg></span>
-      <span>INTEL<span class="brand-accent">DASH</span></span>
+    <a class="sidebar-brand" href="{{ url_for('lapinhar') if session.role == 'mahasiswa' else url_for('dashboard') }}">
+      <span class="brand-mark brand-logo"><img src="{{ url_for('static', filename='img/LOGO-INTEL-KEJAKSAAN.png') }}" alt="Logo Intelijen Kejaksaan"></span>
+      <span>INDRA<span class="brand-accent">ONE</span></span>
     </a>
     <nav class="sidebar-nav">
-      <p>MENU UTAMA</p>
-      <a class="{{ 'active' if active == 'dashboard' }}" href="{{ url_for('dashboard') }}"><span class="nav-icon">⌂</span> Dashboard</a>
+      {% if session.role != 'mahasiswa' %}<p>MENU UTAMA</p>
+      <a class="{{ 'active' if active == 'dashboard' }}" href="{{ url_for('dashboard') }}"><span class="nav-icon">DB</span> Dashboard</a>{% endif %}
       <p>LAPORAN</p>
-      <a class="{{ 'active' if active == 'lapinhar' }}" href="{{ url_for('lapinhar') }}"><span class="nav-icon">▤</span> LAPINHAR</a>
-      <a class="{{ 'active' if active == 'lapinsus' }}" href="{{ url_for('lapinsus') }}"><span class="nav-icon">◇</span> LAPINSUS</a>
+      <a class="{{ 'active' if active == 'lapinhar' }}" href="{{ url_for('lapinhar') }}"><span class="nav-icon">L.IN.1</span> LAPINHAR</a>
+      <a class="{{ 'active' if active == 'lapinsus' }}" href="{{ url_for('lapinsus') }}"><span class="nav-icon">L.IN.2</span> LAPINSUS</a>
+      {% if session.role != 'mahasiswa' %}<p>REGISTER INTELIJEN</p>
+      <a class="{{ 'active' if active == 'register_intelijen' }}" href="{{ url_for('register_intelijen') }}"><span class="nav-icon">R.IN.3</span> Register Kerja Intelijen</a>
+      <a class="{{ 'active' if active == 'register_intelijen_rin5' }}" href="{{ url_for('register_intelijen_rin5') }}"><span class="nav-icon">R.IN.5</span> Register Produk Intelijen</a>
       <p>KONFIGURASI AKUN</p>
-      <a class="{{ 'active' if active == 'integration_settings' }}" href="{{ url_for('integration_settings') }}"><span class="nav-icon">⚙</span> Konfigurasi Integrasi</a>
+      <a class="{{ 'active' if active == 'integration_settings' }}" href="{{ url_for('integration_settings') }}"><span class="nav-icon">CFG</span> Konfigurasi Integrasi</a>{% endif %}
       {% if session.role == 'admin' %}
       <p>ADMINISTRASI</p>
-      <a class="{{ 'active' if active == 'users' }}" href="{{ url_for('users') }}"><span class="nav-icon">♙</span> Pengguna</a>
-      <a class="{{ 'active' if active == 'organization' }}" href="{{ url_for('organization_settings') }}"><span class="nav-icon">▣</span> Konfigurasi Instansi</a>
-      <a class="{{ 'active' if active == 'signatories' }}" href="{{ url_for('signatory_settings') }}"><span class="nav-icon">⚙</span> Konfigurasi TTD</a>
+      <a class="{{ 'active' if active == 'users' }}" href="{{ url_for('users') }}"><span class="nav-icon">USR</span> Pengguna</a>
+      <a class="{{ 'active' if active == 'organization' }}" href="{{ url_for('organization_settings') }}"><span class="nav-icon">ORG</span> Konfigurasi Instansi</a>
+      <a class="{{ 'active' if active == 'signatories' }}" href="{{ url_for('signatory_settings') }}"><span class="nav-icon">TTD</span> Konfigurasi TTD</a>
       {% endif %}
     </nav>
     <div class="sidebar-meta"><span class="online-dot"></span><div><strong>Sistem Online</strong><small>Database terhubung</small></div></div>
   </aside>
   <div class="app-main">
     <header class="topbar">
-      <button class="menu-toggle" type="button" data-sidebar-toggle aria-label="Buka menu">☰</button>
+      <button class="menu-toggle" type="button" data-sidebar-toggle aria-label="Buka menu">Menu</button>
+      <button class="sidebar-hide-toggle" type="button" data-sidebar-collapse-toggle aria-label="Sembunyikan menu" title="Sembunyikan / tampilkan menu">
+        <span data-sidebar-collapse-icon>‹</span>
+      </button>
       <div class="topbar-title"><strong>{% block page_title %}Dashboard{% endblock %}</strong><small>Sistem Penyusunan Laporan Intelijen</small></div>
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Aktifkan mode gelap" title="Mode gelap"><span class="theme-icon-light" aria-hidden="true">☀</span><span class="theme-icon-dark" aria-hidden="true">☾</span></button>
       <div class="profile-menu">
         <button type="button" class="profile-trigger" data-profile-toggle>
-          <span class="avatar">{{ session.full_name[:1] | upper }}</span>
-          <span class="profile-text"><strong>{{ session.full_name }}</strong><small>{{ session.role | upper }}</small></span><span>⌄</span>
+          <span class="avatar">{% if session.profile_photo %}<img src="{{ url_for('user_avatar', user_id=session.user_id) }}" alt="Foto profil {{ session.full_name }}">{% else %}{{ session.full_name[:1] | upper }}{% endif %}</span>
+          <span class="profile-text"><strong>{{ session.full_name }}</strong><small>{{ session.role | upper }}</small></span><span>v</span>
         </button>
         <div class="profile-dropdown" data-profile-dropdown>
           <div><strong>{{ session.full_name }}</strong><small>@{{ session.username }}</small></div>
+          {% if session.role != 'mahasiswa' %}<a class="profile-edit-link" href="{{ url_for('profile_settings') }}">Edit Pengguna</a>{% endif %}
           <form action="{{ url_for('logout') }}" method="post"><button type="submit">Keluar dari sistem</button></form>
         </div>
       </div>
@@ -42,7 +51,7 @@
       {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="alert {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
       {% block app_content %}{% endblock %}
     </main>
-    <footer class="app-footer"><span>© 2026 Intel Dashboard</span><span>Versi 1.0.0 · Sistem aktif</span></footer>
+    <footer class="app-footer"><span>&copy; 2026 IndraOne</span><span>Versi 1.0.0 - Ariawan</span></footer>
   </div>
 </div>
 {% endblock %}

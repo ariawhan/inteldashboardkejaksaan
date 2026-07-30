@@ -30,10 +30,66 @@ if (profileToggle && profileDropdown) {
   document.addEventListener("click", () => profileDropdown.classList.remove("open"));
 }
 
+const themeToggle = document.querySelector("[data-theme-toggle]");
+const applyTheme = (theme) => {
+  const dark = theme === "dark";
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  document.body.classList.toggle("dark-mode", dark);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", dark ? "#07111f" : "#f4f7f9");
+  themeToggle?.setAttribute("aria-label", dark ? "Aktifkan mode terang" : "Aktifkan mode gelap");
+  themeToggle?.setAttribute("title", dark ? "Mode terang" : "Mode gelap");
+  themeToggle?.setAttribute("aria-pressed", dark ? "true" : "false");
+};
+applyTheme(localStorage.getItem("indraone-theme") === "dark" ? "dark" : "light");
+themeToggle?.addEventListener("click", () => {
+  const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  localStorage.setItem("indraone-theme", nextTheme);
+  applyTheme(nextTheme);
+});
+
 const sidebarToggle = document.querySelector("[data-sidebar-toggle]");
 if (sidebarToggle) {
   sidebarToggle.addEventListener("click", () => document.querySelector("#sidebar").classList.toggle("open"));
 }
+
+const sidebarCollapseToggle = document.querySelector("[data-sidebar-collapse-toggle]");
+const sidebarCollapseIcon = document.querySelector("[data-sidebar-collapse-icon]");
+const setSidebarCollapsed = (collapsed) => {
+  document.body.classList.toggle("sidebar-collapsed", collapsed);
+  if (sidebarCollapseIcon) sidebarCollapseIcon.textContent = collapsed ? "›" : "‹";
+  sidebarCollapseToggle?.setAttribute("aria-label", collapsed ? "Tampilkan menu" : "Sembunyikan menu");
+  sidebarCollapseToggle?.setAttribute("aria-expanded", collapsed ? "false" : "true");
+};
+if (sidebarCollapseToggle) {
+  setSidebarCollapsed(document.body.classList.contains("sidebar-collapsed"));
+  sidebarCollapseToggle.addEventListener("click", () => {
+    setSidebarCollapsed(!document.body.classList.contains("sidebar-collapsed"));
+  });
+}
+
+const reportActionMenus = document.querySelectorAll("[data-report-action-menu]");
+function closeReportActionMenus(exceptMenu = null) {
+  reportActionMenus.forEach((menu) => {
+    if (menu === exceptMenu) return;
+    menu.classList.remove("open");
+    menu.querySelector("[data-report-action-toggle]")?.setAttribute("aria-expanded", "false");
+  });
+}
+reportActionMenus.forEach((menu) => {
+  const button = menu.querySelector("[data-report-action-toggle]");
+  button?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const willOpen = !menu.classList.contains("open");
+    closeReportActionMenus(menu);
+    menu.classList.toggle("open", willOpen);
+    button.setAttribute("aria-expanded", willOpen ? "true" : "false");
+  });
+  menu.addEventListener("click", (event) => event.stopPropagation());
+});
+document.addEventListener("click", () => closeReportActionMenus());
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeReportActionMenus();
+});
 
 document.querySelectorAll("[data-preview]").forEach((input) => {
   const outputs = document.querySelectorAll(`[data-output="${input.dataset.preview}"]`);

@@ -1,17 +1,70 @@
 {% extends "app_layout.html" %}
-{% block title %}Konfigurasi Instansi — Intel Dashboard{% endblock %}
+{% block title %}Konfigurasi Instansi — IndraOne{% endblock %}
 {% block page_title %}Konfigurasi Instansi{% endblock %}
 {% block app_content %}
 <section class="page-heading"><div><p class="section-kicker">KONFIGURASI</p><h1>Data Instansi</h1><p>Data ini digunakan otomatis pada pratinjau dan dokumen laporan.</p></div></section>
 <section class="content-card organization-config-card">
   <div class="config-card-head"><span>01</span><div><h2>Identitas Instansi</h2><small>Konfigurasi utama aplikasi</small></div></div>
-  <form method="post" class="admin-form">
+  <form method="post" class="admin-form" enctype="multipart/form-data">
     <label>Nama instansi<input name="organization_name" value="{{ organization.organization_name }}" required></label>
     <label>Kode instansi<input name="institution_code" value="{{ organization.institution_code }}" required placeholder="N.1.11"></label>
     <label>Alamat<textarea name="address" rows="4" required>{{ organization.address }}</textarea></label>
     <label>Nomor telepon<input name="phone" value="{{ organization.phone }}" required></label>
     <label>Website<input name="website" value="{{ organization.website }}" placeholder="https://www.kejaksaan.go.id" required></label>
+    <div class="signature-upload-section organization-stamp-upload" data-stamp-upload>
+      <div class="signature-upload-heading"><div><strong>Cap Digital Instansi</strong><small>Gunakan PNG transparan agar cap menyatu dengan dokumen.</small></div>{% if organization.digital_stamp %}<span class="signature-ready">Tersimpan</span>{% endif %}</div>
+      <label class="signature-dropzone">
+        <input type="file" name="digital_stamp" accept="image/png,image/jpeg,image/webp" data-stamp-input>
+        <span class="signature-upload-icon stamp-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9" r="4"/><path d="M8.5 12.5 7 17h10l-1.5-4.5M6 20h12"/></svg></span>
+        <span class="signature-upload-copy"><strong data-stamp-file-name>Pilih gambar cap digital</strong><small>Klik atau tarik file ke area ini</small><em>JPG, PNG, WebP</em></span>
+      </label>
+      <div class="signature-image-preview {{ 'has-image' if organization.digital_stamp else '' }}" data-stamp-preview>
+        <span>Pratinjau cap</span>
+        <div>{% if organization.digital_stamp %}<img src="{{ url_for('organization_digital_stamp_file') }}" alt="Cap digital {{ organization.organization_name }}" data-stamp-preview-image>{% else %}<img src="" alt="" data-stamp-preview-image hidden><p data-stamp-empty>Belum ada cap digital</p>{% endif %}</div>
+      </div>
+      {% if organization.digital_stamp %}
+      <label class="signature-remove"><input type="checkbox" name="remove_digital_stamp" value="1"> <span>Hapus cap digital yang tersimpan</span></label>
+      {% endif %}
+    </div>
     <button class="primary-button" type="submit">Simpan perubahan</button>
   </form>
 </section>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+document.querySelectorAll("[data-stamp-upload]").forEach((section) => {
+  const input = section.querySelector("[data-stamp-input]");
+  const dropzone = section.querySelector(".signature-dropzone");
+  const fileName = section.querySelector("[data-stamp-file-name]");
+  const preview = section.querySelector("[data-stamp-preview]");
+  const image = section.querySelector("[data-stamp-preview-image]");
+  const empty = section.querySelector("[data-stamp-empty]");
+  const showFile = (file) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    fileName.textContent = file.name;
+    image.src = URL.createObjectURL(file);
+    image.hidden = false;
+    empty?.remove();
+    preview.classList.add("has-image");
+    dropzone.classList.add("file-selected");
+  };
+  input.addEventListener("change", () => showFile(input.files[0]));
+  ["dragenter", "dragover"].forEach((name) => dropzone.addEventListener(name, (event) => {
+    event.preventDefault();
+    dropzone.classList.add("is-dragging");
+  }));
+  ["dragleave", "drop"].forEach((name) => dropzone.addEventListener(name, (event) => {
+    event.preventDefault();
+    dropzone.classList.remove("is-dragging");
+  }));
+  dropzone.addEventListener("drop", (event) => {
+    const file = event.dataTransfer.files[0];
+    if (!file || !file.type.startsWith("image/")) return;
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    input.files = transfer.files;
+    showFile(file);
+  });
+});
+</script>
 {% endblock %}

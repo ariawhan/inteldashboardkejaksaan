@@ -1,12 +1,84 @@
 {% extends "app_layout.html" %}
-{% block title %}Pengguna — Intel Dashboard{% endblock %}
+{% block title %}Pengguna — IndraOne{% endblock %}
 {% block page_title %}Kelola Pengguna{% endblock %}
 {% block app_content %}
-<section class="page-heading"><div><p class="section-kicker">ADMINISTRASI</p><h1>Manajemen pengguna</h1><p>Buat akun, atur status, dan ganti password pengguna.</p></div></section>
+<section class="page-heading">
+  <div><p class="section-kicker">ADMINISTRASI</p><h1>Manajemen pengguna</h1><p>Buat akun, atur status, ubah profil, dan ganti password pengguna.</p></div>
+</section>
+
 <div class="two-column users-layout">
-  <section class="content-card"><h2>Tambah pengguna</h2><form method="post" class="admin-form"><label>Nama lengkap<input name="full_name" required placeholder="Nama lengkap pengguna"></label><label>Username<input name="username" required placeholder="Username untuk login"></label><label>Kata sandi<input name="password" type="password" minlength="6" required placeholder="Minimal 6 karakter"></label><label>Role<select name="role"><option value="user">User</option><option value="admin">Admin</option></select></label><button class="primary-button">Simpan pengguna</button></form></section>
-  <section class="content-card table-card"><div class="card-heading"><h2>Daftar pengguna</h2><span>{{ users|length }} akun</span></div><div class="table-wrap"><table><thead><tr><th>Pengguna</th><th>Username</th><th>Role</th><th>Status</th><th>Aksi</th></tr></thead><tbody>{% for user in users %}<tr><td><strong>{{ user.full_name }}</strong></td><td>@{{ user.username }}</td><td><span class="role-badge {{ user.role }}">{{ user.role }}</span></td><td><span class="user-state {{ 'active' if user.is_active else 'inactive' }}">{{ 'Aktif' if user.is_active else 'Nonaktif' }}</span></td><td><div class="user-actions"><button type="button" data-password-user data-user-id="{{ user.id }}" data-user-name="{{ user.full_name|e }}">Ganti Password</button>{% if user.id != session.user_id %}<form method="post" action="{{ url_for('toggle_user_active', user_id=user.id) }}" onsubmit="return confirm('{{ 'Nonaktifkan' if user.is_active else 'Aktifkan' }} akun {{ user.full_name|e }}?')"><button class="{{ 'deactivate' if user.is_active else 'activate' }}" type="submit">{{ 'Nonaktifkan' if user.is_active else 'Aktifkan' }}</button></form>{% endif %}</div></td></tr>{% endfor %}</tbody></table></div></section>
+  <section class="content-card">
+    <h2>Tambah pengguna</h2>
+    <form method="post" class="admin-form">
+      <label>Nama lengkap<input name="full_name" required placeholder="Nama lengkap pengguna"></label>
+      <label>Username<input name="username" required placeholder="Username untuk login"></label>
+      <label>Kata sandi<input name="password" type="password" minlength="6" required placeholder="Minimal 6 karakter"></label>
+      <label>Role<select name="role"><option value="user">User</option><option value="mahasiswa">Mahasiswa</option><option value="admin">Admin</option></select></label>
+      <button class="primary-button">Simpan pengguna</button>
+    </form>
+  </section>
+
+  <section class="content-card table-card">
+    <div class="card-heading"><h2>Daftar pengguna</h2><span>{{ users|length }} akun</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Pengguna</th><th>Username</th><th>Role</th><th>Status</th><th>Aksi</th></tr></thead>
+        <tbody>
+          {% for user in users %}
+          <tr>
+            <td><div class="user-list-profile"><span>{% if user.profile_photo %}<img src="{{ url_for('user_avatar', user_id=user.id) }}" alt="Foto {{ user.full_name }}">{% else %}{{ user.full_name[:1] | upper }}{% endif %}</span><strong>{{ user.full_name }}</strong></div></td>
+            <td>@{{ user.username }}</td>
+            <td><span class="role-badge {{ user.role }}">{{ user.role }}</span></td>
+            <td><span class="user-state {{ 'active' if user.is_active else 'inactive' }}">{{ 'Aktif' if user.is_active else 'Nonaktif' }}</span></td>
+            <td>
+              <div class="user-actions">
+                <button type="button" data-edit-user data-user-id="{{ user.id }}" data-user-name="{{ user.full_name|e }}" data-user-avatar="{{ url_for('user_avatar', user_id=user.id) if user.profile_photo else '' }}">Edit</button>
+                <button type="button" data-password-user data-user-id="{{ user.id }}" data-user-name="{{ user.full_name|e }}">Ganti Password</button>
+                {% if user.id != session.user_id %}
+                <form method="post" action="{{ url_for('toggle_user_active', user_id=user.id) }}" onsubmit="return confirm('{{ 'Nonaktifkan' if user.is_active else 'Aktifkan' }} akun {{ user.full_name|e }}?')"><button class="{{ 'deactivate' if user.is_active else 'activate' }}" type="submit">{{ 'Nonaktifkan' if user.is_active else 'Aktifkan' }}</button></form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
 </div>
-<div class="password-admin-modal" data-password-admin-modal hidden><div class="password-admin-backdrop" data-password-admin-close></div><section class="password-admin-dialog" role="dialog" aria-modal="true"><button type="button" class="password-admin-close" data-password-admin-close>×</button><div class="password-admin-icon">•••</div><p class="section-kicker">KEAMANAN AKUN</p><h2>Ganti Password</h2><p>Password baru untuk <strong data-password-admin-name>pengguna</strong>.</p><form method="post" data-password-admin-form><label>Password baru<input type="password" name="new_password" minlength="6" required placeholder="Minimal 6 karakter"></label><label>Konfirmasi password<input type="password" name="confirm_password" minlength="6" required placeholder="Ulangi password baru"></label><div><button type="button" data-password-admin-close>Batal</button><button type="submit">Simpan Password</button></div></form></section></div>
+
+<div class="password-admin-modal" data-user-edit-modal hidden>
+  <div class="password-admin-backdrop" data-user-edit-close></div>
+  <section class="password-admin-dialog user-edit-dialog" role="dialog" aria-modal="true">
+    <button type="button" class="password-admin-close" data-user-edit-close>×</button>
+    <div class="user-edit-photo"><span data-user-edit-initial>U</span><img data-user-edit-image hidden alt="Foto pengguna"></div>
+    <p class="section-kicker">EDIT PENGGUNA</p>
+    <h2>Ubah Data Pengguna</h2>
+    <form method="post" enctype="multipart/form-data" data-user-edit-form>
+      <label class="admin-photo-input">Foto profil<span>Pilih foto baru dan cek preview di atas.</span><input type="file" name="profile_photo" accept="image/png,image/jpeg,image/webp" data-user-edit-photo-input></label>
+      <label class="profile-zoom-control admin-zoom-control"><span>Zoom preview</span><input type="range" min="1" max="2" step="0.05" value="1" data-user-edit-zoom></label>
+      <label>Nama pengguna<input name="full_name" required></label>
+      <label>Password baru<input type="password" name="new_password" minlength="6" placeholder="Kosongkan jika tidak diganti"></label>
+      <label>Konfirmasi password<input type="password" name="confirm_password" minlength="6" placeholder="Ulangi password baru"></label>
+      <div><button type="button" data-user-edit-close>Batal</button><button type="submit">Simpan Pengguna</button></div>
+    </form>
+  </section>
+</div>
+
+<div class="password-admin-modal" data-password-admin-modal hidden>
+  <div class="password-admin-backdrop" data-password-admin-close></div>
+  <section class="password-admin-dialog" role="dialog" aria-modal="true">
+    <button type="button" class="password-admin-close" data-password-admin-close>×</button>
+    <div class="password-admin-icon">•••</div>
+    <p class="section-kicker">KEAMANAN AKUN</p>
+    <h2>Ganti Password</h2>
+    <p>Password baru untuk <strong data-password-admin-name>pengguna</strong>.</p>
+    <form method="post" data-password-admin-form>
+      <label>Password baru<input type="password" name="new_password" minlength="6" required placeholder="Minimal 6 karakter"></label>
+      <label>Konfirmasi password<input type="password" name="confirm_password" minlength="6" required placeholder="Ulangi password baru"></label>
+      <div><button type="button" data-password-admin-close>Batal</button><button type="submit">Simpan Password</button></div>
+    </form>
+  </section>
+</div>
 {% endblock %}
-{% block extra_scripts %}<script src="{{ url_for('static', filename='js/user-management.js') }}"></script>{% endblock %}
+{% block extra_scripts %}<script src="{{ url_for('static', filename='js/user-management.js', v='20260730-user-edit') }}"></script>{% endblock %}

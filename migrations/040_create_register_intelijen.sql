@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS register_intelijen_entries (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    register_code VARCHAR(20) NOT NULL DEFAULT 'R.IN.3',
+    report_date DATE NOT NULL,
+    field_code VARCHAR(20) NOT NULL,
+    received_time TIME NULL,
+    source_name VARCHAR(255) NOT NULL,
+    information_value VARCHAR(10) NOT NULL DEFAULT 'A1',
+    information_description TEXT NOT NULL,
+    notes TEXT NULL,
+    disposition TEXT NULL,
+    follow_up TEXT NULL,
+    remarks VARCHAR(255) NOT NULL DEFAULT 'Arsip',
+    created_by INT UNSIGNED NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_register_intelijen_created_by FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_register_intelijen_report_date (report_date),
+    INDEX idx_register_intelijen_field_code (field_code),
+    INDEX idx_register_intelijen_created_by (created_by)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

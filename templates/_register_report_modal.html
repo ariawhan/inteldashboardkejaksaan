@@ -1,0 +1,62 @@
+<div class="register-report-modal" data-register-report-modal hidden>
+  <button type="button" class="register-report-backdrop" data-register-report-close aria-label="Tutup popup"></button>
+  <form class="register-report-dialog" data-register-report-form>
+    <button type="button" class="register-report-close" data-register-report-close aria-label="Tutup">×</button>
+    <header class="register-report-head">
+      <span>R.3/5</span>
+      <div>
+        <p class="section-kicker">REGISTER KERJA INTELIJEN</p>
+        <h2>Registerkan <span data-register-report-label>Laporan</span></h2>
+        <p>Lengkapi data disposisi sebelum laporan dimasukkan ke R.IN.3 dan R.IN.5.</p>
+      </div>
+    </header>
+
+    <div class="register-report-source">
+      <span>Laporan yang dipilih</span>
+      <strong data-register-report-number>—</strong>
+      <small data-register-report-subject>Perihal laporan</small>
+    </div>
+
+    <div class="register-report-fixed">
+      <span><b>Nama Satker</b><small>Sesuai konfigurasi instansi</small></span>
+      <span><b>Tanggal &amp; Bidang</b><small>Sesuai data laporan</small></span>
+      <span><b>Sumber/Bapul</b><small>Kejari Buleleng</small></span>
+      <span><b>Uraian Informasi</b><small>Kalimat pertama informasi yang diperoleh</small></span>
+    </div>
+
+    <div class="register-report-grid">
+      <label>
+        <span>Waktu Diterima</span>
+        <input type="time" name="received_time" required>
+      </label>
+      <label>
+        <span>Nilai Data/Informasi</span>
+        <select name="information_value" required>
+          {% for letter in ['A', 'B', 'C', 'D', 'E', 'F'] %}
+            {% for number in range(1, 7) %}
+            <option value="{{ letter }}{{ number }}" {{ 'selected' if letter == 'A' and number == 1 else '' }}>{{ letter }}{{ number }}</option>
+            {% endfor %}
+          {% endfor %}
+        </select>
+      </label>
+      <label class="full">
+        <span>Disposisi/Tindakan</span>
+        <textarea name="disposition" rows="2" required>TL KE KEJATI</textarea>
+      </label>
+      <label class="full">
+        <span>Tindak Lanjut</span>
+        <textarea name="follow_up" rows="3" required>-SEGERA TL TERUSKAN KE KEJATI -ARSIPKAN</textarea>
+      </label>
+      <label class="full">
+        <span>Keterangan</span>
+        <input type="text" name="remarks" value="Arsip" maxlength="255" required>
+      </label>
+    </div>
+
+    <p class="register-report-message" data-register-report-message hidden></p>
+    <footer>
+      <button type="button" class="register-report-cancel" data-register-report-close>Batal</button>
+      <button type="submit" class="register-report-submit">Registerkan ke R.IN.3 &amp; R.IN.5</button>
+    </footer>
+  </form>
+</div>

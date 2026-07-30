@@ -1,0 +1,65 @@
+{% extends "app_layout.html" %}
+{% block title %}Edit Pengguna — IndraOne{% endblock %}
+{% block page_title %}Edit Pengguna{% endblock %}
+{% block app_content %}
+<section class="page-heading">
+  <div><p class="section-kicker">PROFIL AKUN</p><h1>Edit Pengguna</h1><p>Perbarui foto profil, nama pengguna, dan password akun Anda.</p></div>
+</section>
+
+<section class="content-card profile-settings-card">
+  <form method="post" enctype="multipart/form-data" class="profile-settings-form">
+    <div class="profile-photo-panel">
+      <div class="profile-photo-preview" data-photo-preview-box>
+        {% if user.profile_photo %}
+        <img src="{{ url_for('user_avatar', user_id=user.id) }}" alt="Foto profil {{ user.full_name }}" data-photo-preview-image>
+        {% else %}
+        <span data-photo-preview-initial>{{ user.full_name[:1] | upper }}</span><img src="" alt="Preview foto profil" data-photo-preview-image hidden>
+        {% endif %}
+      </div>
+      <div>
+        <h2>Foto Profil</h2>
+        <p>Gunakan JPG/PNG/WEBP. Foto ditampilkan utuh supaya tidak kepotong.</p>
+        <div class="profile-photo-controls">
+          <label class="profile-upload-button">Pilih Foto<input type="file" name="profile_photo" accept="image/png,image/jpeg,image/webp" data-photo-input></label>
+          <label class="profile-zoom-control"><span>Zoom</span><input type="range" min="1" max="2" step="0.05" value="1" data-photo-zoom></label>
+        </div>
+      </div>
+    </div>
+
+    <div class="profile-form-grid">
+      <label>Nama Pengguna<input name="full_name" value="{{ user.full_name }}" required></label>
+      <label>Username<input value="{{ user.username }}" readonly class="readonly-field"></label>
+      <label>Password Lama<input type="password" name="current_password" autocomplete="current-password" placeholder="Wajib jika mengganti password"></label>
+      <label>Password Baru<input type="password" name="new_password" minlength="6" autocomplete="new-password" placeholder="Kosongkan jika tidak diganti"></label>
+      <label>Konfirmasi Password<input type="password" name="confirm_password" minlength="6" autocomplete="new-password" placeholder="Ulangi password baru"></label>
+    </div>
+
+    <div class="profile-actions">
+      <a class="outline-action" href="{{ url_for('dashboard') }}">Batal</a>
+      <button class="primary-button" type="submit">Simpan Profil</button>
+    </div>
+  </form>
+</section>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+(() => {
+  const input = document.querySelector("[data-photo-input]");
+  const image = document.querySelector("[data-photo-preview-image]");
+  const initial = document.querySelector("[data-photo-preview-initial]");
+  const zoom = document.querySelector("[data-photo-zoom]");
+  if (!input || !image) return;
+  const updateZoom = () => image.style.transform = `scale(${zoom?.value || 1})`;
+  input.addEventListener("change", () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    image.src = URL.createObjectURL(file);
+    image.hidden = false;
+    if (initial) initial.hidden = true;
+    if (zoom) zoom.value = "1";
+    updateZoom();
+  });
+  zoom?.addEventListener("input", updateZoom);
+})();
+</script>
+{% endblock %}

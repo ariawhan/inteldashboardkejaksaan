@@ -1,13 +1,13 @@
 {% extends "app_layout.html" %}
-{% block title %}Dashboard — Intel Dashboard{% endblock %}
+{% block title %}Dashboard - IndraOne{% endblock %}
 {% block page_title %}Dashboard{% endblock %}
 {% block app_content %}
 <section class="welcome-row"><div><p class="section-kicker">RINGKASAN HARI INI</p><h1>Selamat datang, {{ session.full_name }}</h1><p>Pantau dan kelola seluruh laporan dari satu tempat.</p></div><span class="date-chip">Database XAMPP terhubung</span></section>
 <section class="stat-grid">
-  <a href="{{ url_for('lapinhar') }}" class="stat-card teal"><div class="stat-icon">▤</div><div><span>Total LAPINHAR</span><strong>{{ counts.lapinhar.total }}</strong><small>{{ counts.lapinhar.draft }} laporan masih draft</small></div><b>→</b></a>
-  <a href="{{ url_for('lapinsus') }}" class="stat-card blue"><div class="stat-icon">◇</div><div><span>Total LAPINSUS</span><strong>{{ counts.lapinsus.total }}</strong><small>{{ counts.lapinsus.draft }} laporan masih draft</small></div><b>→</b></a>
-  <div class="stat-card amber"><div class="stat-icon">✓</div><div><span>Total Laporan</span><strong>{{ counts.lapinhar.total + counts.lapinsus.total }}</strong><small>Seluruh jenis laporan</small></div></div>
-  {% if session.role == 'admin' %}<a href="{{ url_for('users') }}" class="stat-card purple"><div class="stat-icon">♙</div><div><span>Total Pengguna</span><strong>{{ user_count }}</strong><small>Admin dan user aktif</small></div><b>→</b></a>{% endif %}
+  <a href="{{ url_for('lapinhar') }}" class="stat-card teal"><div class="stat-icon">LIH</div><div><span>Total LAPINHAR</span><strong>{{ counts.lapinhar.total }}</strong><small>{{ counts.lapinhar.draft }} laporan masih draft</small><em class="stat-status">Belum Register: {{ counts.lapinhar.register_belum }}</em></div><b>&rarr;</b></a>
+  <a href="{{ url_for('lapinsus') }}" class="stat-card blue"><div class="stat-icon">LIK</div><div><span>Total LAPINSUS</span><strong>{{ counts.lapinsus.total }}</strong><small>{{ counts.lapinsus.draft }} laporan masih draft</small><em class="stat-status">Belum Register: {{ counts.lapinsus.register_belum }}</em></div><b>&rarr;</b></a>
+  <div class="stat-card amber"><div class="stat-icon">OK</div><div><span>Total Laporan</span><strong>{{ counts.lapinhar.total + counts.lapinsus.total }}</strong><small>Seluruh jenis laporan</small></div></div>
+  {% if session.role == 'admin' %}<a href="{{ url_for('users') }}" class="stat-card purple"><div class="stat-icon">USR</div><div><span>Total Pengguna</span><strong>{{ user_count }}</strong><small>Admin dan user aktif</small></div><b>&rarr;</b></a>{% endif %}
 </section>
 <section class="dashboard-panel"><div><p class="section-kicker">AKSES CEPAT</p><h2>Buat laporan baru</h2><p>Pilih jenis laporan yang ingin Anda susun.</p></div><div class="quick-actions"><a href="{{ url_for('lapinhar') }}">+ Buat LAPINHAR</a><a href="{{ url_for('lapinsus') }}">+ Buat LAPINSUS</a></div></section>
 {% endblock %}

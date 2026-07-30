@@ -1,25 +1,23 @@
 {% extends "base.html" %}
-{% block title %}Masuk — Intel Dashboard{% endblock %}
+{% block title %}Masuk — IndraOne{% endblock %}
 {% block content %}
 <main class="login-shell">
   <section class="brand-panel" aria-label="Tentang aplikasi">
     <div class="brand-content">
-      <a class="brand" href="/" aria-label="Intel Dashboard">
-        <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 48 48"><path d="M24 4 41 14v20L24 44 7 34V14L24 4Z"/><path d="m16 25 5 5 11-13"/></svg>
-        </span>
-        <span>INTEL<span class="brand-accent">DASH</span></span>
+      <a class="brand" href="/" aria-label="IndraOne">
+        <span class="brand-mark brand-logo"><img src="{{ url_for('static', filename='img/LOGO-INTEL-KEJAKSAAN.png') }}" alt="Logo Intelijen Kejaksaan"></span>
+        <span>INDRA<span class="brand-accent">ONE</span></span>
       </a>
 
       <div class="hero-copy">
-        <span class="eyebrow"><i></i> Sistem Penyusunan Laporan</span>
-        <h1>Informasi akurat.<br><em>Keputusan lebih cepat.</em></h1>
-        <p>Ruang kerja terpadu untuk menyusun, mengelola, dan memantau laporan informasi harian dan khusus.</p>
+        <span class="eyebrow"><i></i>Sistem Informasi</span>
+        <h1>Data, Analisis, <br><em>dan Pelaporan Intelijen Terintegrasi</em></h1>
+        <p>Ruang kerja terpadu untuk menyusun, mengelola, dan memantau laporan informasi Intelijen.</p>
       </div>
 
       <div class="report-types">
-        <div class="report-item"><span>01</span><div><strong>LAPINHAR</strong><small>Laporan Informasi Harian</small></div></div>
-        <div class="report-item"><span>02</span><div><strong>LAPINSUS</strong><small>Laporan Informasi Khusus</small></div></div>
+        <div class="report-item"><span>L.IN</span><div><strong>Laporan</strong><small>Lapinhar</small></div></div>
+        <div class="report-item"><span>R.IN</span><div><strong>Register</strong><small>Register Intelijen</small></div></div>
       </div>
     </div>
     <div class="grid-decoration"></div>
@@ -29,8 +27,8 @@
   <section class="form-panel">
     <div class="login-card">
       <div class="mobile-brand">
-        <span class="brand-mark"><svg viewBox="0 0 48 48"><path d="M24 4 41 14v20L24 44 7 34V14L24 4Z"/><path d="m16 25 5 5 11-13"/></svg></span>
-        <span>INTEL<span class="brand-accent">DASH</span></span>
+        <span class="brand-mark brand-logo"><img src="{{ url_for('static', filename='img/LOGO-INTEL-KEJAKSAAN.png') }}" alt="Logo Intelijen Kejaksaan"></span>
+        <span>INDRA<span class="brand-accent">ONE</span></span>
       </div>
       <div class="form-heading">
         <span class="status-pill"><i></i> Sistem Aktif</span>
@@ -65,7 +63,7 @@
       </form>
       <p class="security-note"><span>◆</span> Akses terbatas untuk personel berwenang</p>
     </div>
-    <footer>© 2026 Intel Dashboard · Versi 1.0.0</footer>
+    <footer>© 2026 IndraOne · Versi 1.0.0</footer>
   </section>
 </main>
 <div class="forgot-password-modal" data-forgot-password-modal hidden><div class="forgot-password-backdrop" data-forgot-password-close></div><section class="forgot-password-dialog" role="dialog" aria-modal="true" aria-labelledby="forgot-password-title"><button type="button" class="forgot-password-close" data-forgot-password-close>×</button><div class="forgot-password-icon"><svg viewBox="0 0 24 24"><path d="M12 17v.01M8.5 9a3.5 3.5 0 1 1 5.2 3.05c-1.05.6-1.7 1.16-1.7 2.45"/></svg></div><p class="section-kicker">BANTUAN AKUN</p><h2 id="forgot-password-title">Lupa kata sandi?</h2><p>Silakan hubungi administrator untuk mendapatkan password baru. Demi keamanan, password tidak dapat dipulihkan melalui halaman login.</p><button type="button" data-forgot-password-close>Mengerti</button></section></div>

@@ -1,4 +1,4 @@
-# Intel Dashboard
+# IndraOne
 
 Aplikasi Flask untuk menyusun dan mengelola LAPINHAR serta LAPINSUS dengan database MySQL/MariaDB. Fitur mencakup editor laporan, pratinjau folio, ekspor PDF, lampiran foto, penomoran surat tahunan, manajemen pengguna, serta konfigurasi integrasi Inteliz, Sipede, dan WhatsApp.
 
@@ -29,7 +29,7 @@ python app.py
 
 Aplikasi tersedia pada `http://127.0.0.1:5050`. Komputer lain pada jaringan lokal dapat menggunakan alamat IP server, misalnya `http://192.168.1.10:5050`.
 
-Pada Windows, aplikasi juga dapat dijalankan melalui `start.bat`.
+Pada Windows, aplikasi juga dapat dijalankan melalui `Run IndraOne.bat`. Panduan lengkap untuk komputer server, autostart, dan set nomor surat terakhir ada di `docs/SERVER_WINDOWS.md`.
 
 ## Struktur utama
 
