@@ -13,9 +13,32 @@
       <p>LAPORAN</p>
       <a class="{{ 'active' if active == 'lapinhar' }}" href="{{ url_for('lapinhar') }}"><span class="nav-icon">L.IN.1</span> LAPINHAR</a>
       <a class="{{ 'active' if active == 'lapinsus' }}" href="{{ url_for('lapinsus') }}"><span class="nav-icon">L.IN.2</span> LAPINSUS</a>
-      {% if session.role != 'mahasiswa' %}<p>REGISTER INTELIJEN</p>
-      <a class="{{ 'active' if active == 'register_intelijen' }}" href="{{ url_for('register_intelijen') }}"><span class="nav-icon">R.IN.3</span> Register Kerja Intelijen</a>
-      <a class="{{ 'active' if active == 'register_intelijen_rin5' }}" href="{{ url_for('register_intelijen_rin5') }}"><span class="nav-icon">R.IN.5</span> Register Produk Intelijen</a>
+      {% if session.role != 'mahasiswa' %}
+      <details class="nav-group" {% if active in ['register_intelijen_rin1','register_intelijen_rin2','register_intelijen','register_intelijen_rin4','register_intelijen_rin5','register_intelijen_rin6','register_intelijen_rin7','register_intelijen_rin8','register_intelijen_rin9','register_intelijen_rin10','register_intelijen_rin11','register_intelijen_rin12','register_intelijen_rin13','register_intelijen_rin14','register_intelijen_rin15','register_intelijen_rin16','register_intelijen_rin17','register_intelijen_rin18','register_intelijen_rin19','register_intelijen_rin20','register_intelijen_rin21','register_intelijen_rin22'] %}open{% endif %}>
+        <summary><span class="nav-icon">R.IN</span>Register Intelijen</summary>
+        <a class="{{ 'active' if active == 'register_intelijen_rin1' }}" href="{{ url_for('register_intelijen_rin1') }}"><span class="nav-icon">1</span> Surat Masuk</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin2' }}" href="{{ url_for('register_intelijen_generic', slug='rin2') }}"><span class="nav-icon">2</span> Surat Keluar</a>
+        <a class="{{ 'active' if active == 'register_intelijen' }}" href="{{ url_for('register_intelijen') }}"><span class="nav-icon">3</span> Kerja Intelijen</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin4' }}" href="{{ url_for('register_intelijen_generic', slug='rin4') }}"><span class="nav-icon">4</span> Ekspedisi Surat</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin5' }}" href="{{ url_for('register_intelijen_rin5') }}"><span class="nav-icon">5</span>Produk Intelijen</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin6' }}" href="{{ url_for('register_intelijen_generic', slug='rin6') }}"><span class="nav-icon">6</span> Arsip</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin7' }}" href="{{ url_for('register_intelijen_generic', slug='rin7') }}"><span class="nav-icon">7</span> Kegiatan Ipolekhankam</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin8' }}" href="{{ url_for('register_intelijen_generic', slug='rin8') }}"><span class="nav-icon">8</span> Kegiatan Sosbud</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin9' }}" href="{{ url_for('register_intelijen_generic', slug='rin9') }}"><span class="nav-icon">9</span> Kegiatan Ekkeu</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin10' }}" href="{{ url_for('register_intelijen_generic', slug='rin10') }}"><span class="nav-icon">10</span> Kegiatan PPS</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin11' }}" href="{{ url_for('register_intelijen_generic', slug='rin11') }}"><span class="nav-icon">11</span> Kegiatan TI/Prodintel</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin12' }}" href="{{ url_for('register_intelijen_generic', slug='rin12') }}"><span class="nav-icon">12</span> Ops Ipolekhankam</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin13' }}" href="{{ url_for('register_intelijen_generic', slug='rin13') }}"><span class="nav-icon">13</span> Ops Sosbud</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin14' }}" href="{{ url_for('register_intelijen_generic', slug='rin14') }}"><span class="nav-icon">14</span> Ops Ekkeu</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin15' }}" href="{{ url_for('register_intelijen_generic', slug='rin15') }}"><span class="nav-icon">15</span> Ops PPS</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin16' }}" href="{{ url_for('register_intelijen_generic', slug='rin16') }}"><span class="nav-icon">16</span> Ops TI/Prodintel</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin17' }}" href="{{ url_for('register_intelijen_generic', slug='rin17') }}"><span class="nav-icon">17</span> Berita Masuk</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin18' }}" href="{{ url_for('register_intelijen_generic', slug='rin18') }}"><span class="nav-icon">18</span> Berita Keluar</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin19' }}" href="{{ url_for('register_intelijen_generic', slug='rin19') }}"><span class="nav-icon">19</span> Telaahan Intelijen</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin20' }}" href="{{ url_for('register_intelijen_generic', slug='rin20') }}"><span class="nav-icon">20</span> Ekspedisi Berita</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin21' }}" href="{{ url_for('register_intelijen_generic', slug='rin21') }}"><span class="nav-icon">21</span> Tamu PPH/PPM</a>
+        <a class="{{ 'active' if active == 'register_intelijen_rin22' }}" href="{{ url_for('register_intelijen_generic', slug='rin22') }}"><span class="nav-icon">22</span> Penkum/Luhkum</a>
+      </details>
       <p>KONFIGURASI AKUN</p>
       <a class="{{ 'active' if active == 'integration_settings' }}" href="{{ url_for('integration_settings') }}"><span class="nav-icon">CFG</span> Konfigurasi Integrasi</a>{% endif %}
       {% if session.role == 'admin' %}

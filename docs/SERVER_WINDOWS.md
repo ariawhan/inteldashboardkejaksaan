@@ -140,3 +140,39 @@ Yang perlu dipindahkan/backup:
 - source aplikasi
 
 Jangan hanya copy source tanpa database, karena nomor surat, user, konfigurasi TTD, dan laporan tersimpan di MySQL.
+
+## 6. Jika Login SIPede/Inteliz Kena Proxy
+
+Jika Chrome biasa bisa membuka SIPede, tetapi popup login otomatis menampilkan `net::ERR_NETWORK_ACCESS_DENIED`, pastikan `.env` berisi:
+
+```env
+BROWSER_USE_SYSTEM_PROXY=1
+```
+
+Jika proxy Windows masih belum terbaca, isi proxy manual:
+
+```env
+BROWSER_PROXY_SERVER=http://alamat-proxy:port
+BROWSER_PROXY_BYPASS=localhost;127.0.0.1;<-loopback>
+```
+
+Khusus SIPede saja:
+
+```env
+SIPEDE_BROWSER_PROXY_SERVER=http://alamat-proxy:port
+```
+
+Jika muncul `ERR_PROXY_CONNECTION_FAILED`, matikan proxy khusus SIPede agar langsung mencoba koneksi biasa:
+
+```env
+SIPEDE_BROWSER_USE_SYSTEM_PROXY=0
+```
+
+Untuk melihat Chrome automasi saat debug:
+
+```env
+SIPEDE_BROWSER_HEADLESS=0
+SIPEDE_BROWSER_SLOW_MO=250
+```
+
+Setelah mengubah `.env`, restart `Run IndraOne.bat`.

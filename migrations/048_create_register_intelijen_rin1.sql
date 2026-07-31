@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS register_intelijen_rin1_entries (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    register_code VARCHAR(20) NOT NULL DEFAULT 'R.IN.1',
+    received_date DATE NOT NULL,
+    received_time TIME NULL,
+    incoming_letter_number VARCHAR(255) NOT NULL,
+    incoming_letter_date DATE NOT NULL,
+    sender_name VARCHAR(255) NOT NULL,
+    subject TEXT NOT NULL,
+    disposition_date DATE NULL,
+    disposition_content TEXT NULL,
+    follow_up TEXT NULL,
+    remarks VARCHAR(255) NULL DEFAULT 'Arsip',
+    created_by INT UNSIGNED NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_register_intelijen_rin1_created_by FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_register_intelijen_rin1_received_date (received_date),
+    INDEX idx_register_intelijen_rin1_sender_name (sender_name),
+    INDEX idx_register_intelijen_rin1_created_by (created_by)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

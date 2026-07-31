@@ -1,0 +1,37 @@
+{% extends "app_layout.html" %}
+{% block title %}{{ config.code }} - IndraOne{% endblock %}
+{% block page_title %}{{ config.code }} {{ config.title }}{% endblock %}
+{% block app_content %}
+<section class="editor-heading">
+  <div><p class="section-kicker">REGISTER INTELIJEN</p><h1>{{ 'Edit' if entry else 'Buat' }} {{ config.code }} {{ config.title }}</h1><p>{{ config.description }}</p></div>
+  <a class="back-link" href="{{ url_for('register_intelijen_generic', slug=slug) }}">Kembali</a>
+</section>
+
+<form method="post" class="register-intel-form">
+  <section class="content-card register-form-card">
+    <div class="form-section-title"><span>{{ config.code.replace('R.IN.', '') }}</span><div><strong>Data {{ config.code }}</strong><small>{{ config.description }}</small></div></div>
+    <div class="form-grid">
+      {% for field in config.fields %}
+      <label class="{{ 'full' if field.type == 'textarea' else '' }}">
+        <span>{{ field.label }}</span>
+        {% if field.type == 'textarea' %}
+        <textarea name="{{ field.name }}" rows="4" {{ 'required' if field.required else '' }}>{{ data.get(field.name, '') }}</textarea>
+        {% elif field.type == 'date' %}
+        <input type="date" name="{{ field.name }}" value="{{ data.get(field.name, '') }}" {{ 'required' if field.required else '' }}>
+        {% elif field.type == 'datetime' %}
+        <input type="datetime-local" name="{{ field.name }}" value="{{ data.get(field.name, '') }}" {{ 'required' if field.required else '' }}>
+        {% elif field.type == 'number' %}
+        <input type="number" min="0" name="{{ field.name }}" value="{{ data.get(field.name, '') }}" {{ 'required' if field.required else '' }}>
+        {% else %}
+        <input type="text" name="{{ field.name }}" value="{{ data.get(field.name, '') }}" {{ 'readonly class=readonly-field' if field.type == 'satker' else '' }} {{ 'required' if field.required else '' }}>
+        {% endif %}
+      </label>
+      {% endfor %}
+    </div>
+  </section>
+  <div class="editor-actions register-form-actions">
+    <button type="submit" class="primary-button">{{ 'Simpan Perubahan' if entry else 'Simpan' }}</button>
+    <a class="outline-action" href="{{ url_for('register_intelijen_generic', slug=slug) }}">Batal</a>
+  </div>
+</form>
+{% endblock %}

@@ -9,7 +9,7 @@
       <span>PDF</span>
       <strong>Ekspor PDF</strong>
     </button>
-    <a class="register-excel-button" href="{{ url_for('export_register_intelijen_excel', q=search, bidang=filter_bidang, month=filter_month, year=filter_year) }}"><span>XLS</span><strong>Ekspor Excel</strong></a>
+    <button type="button" class="register-excel-button" data-register-export-open><span>XLS</span><strong>Ekspor Excel</strong></button>
     <a class="primary-button" href="{{ url_for('create_register_intelijen') }}">+ Tambah Data</a>
   </div>
 </section>
@@ -242,6 +242,7 @@
     </div>
     <div class="register-export-actions">
       <button type="button" class="register-reset-button" data-register-export-close>Batal</button>
+      <button type="submit" class="register-excel-button" formaction="{{ url_for('export_register_intelijen_excel') }}"><span>XLS</span><strong>Download Excel</strong></button>
       <button type="submit" class="primary-button">Download PDF</button>
     </div>
   </form>
@@ -252,9 +253,9 @@
 <script>
 (() => {
   const modal = document.querySelector("[data-register-export-modal]");
-  const openButton = document.querySelector("[data-register-export-open]");
+  const openButtons = document.querySelectorAll("[data-register-export-open]");
   const closeButtons = document.querySelectorAll("[data-register-export-close]");
-  if (!modal || !openButton) return;
+  if (!modal || !openButtons.length) return;
 
   const openModal = () => {
     modal.hidden = false;
@@ -266,10 +267,10 @@
   const closeModal = () => {
     modal.hidden = true;
     document.body.classList.remove("register-export-modal-open");
-    openButton.focus();
+    openButtons[0].focus();
   };
 
-  openButton.addEventListener("click", openModal);
+  openButtons.forEach((button) => button.addEventListener("click", openModal));
   closeButtons.forEach((button) => button.addEventListener("click", closeModal));
   modal.querySelectorAll("[data-acting-export-toggle]").forEach((checkbox) => {
     const key = checkbox.dataset.actingExportToggle;

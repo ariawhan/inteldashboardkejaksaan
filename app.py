@@ -129,6 +129,31 @@ class IntelizAuthenticationRequired(RuntimeError):
     pass
 
 
+def browser_launch_args(extra_args=None, browser_key="BROWSER", use_proxy=True):
+    args = [
+        "--disable-blink-features=AutomationControlled",
+        "--disable-features=BlockInsecurePrivateNetworkRequests",
+    ]
+    if use_proxy:
+        proxy_server = (
+            os.getenv(f"{browser_key}_PROXY_SERVER", "").strip()
+            or os.getenv("BROWSER_PROXY_SERVER", "").strip()
+        )
+        proxy_bypass = (
+            os.getenv(f"{browser_key}_PROXY_BYPASS", "").strip()
+            or os.getenv("BROWSER_PROXY_BYPASS", "").strip()
+        )
+        if proxy_server:
+            args.append(f"--proxy-server={proxy_server}")
+        elif os.getenv(f"{browser_key}_USE_SYSTEM_PROXY", os.getenv("BROWSER_USE_SYSTEM_PROXY", "1")) == "1":
+            args.append("--proxy-server=system")
+        if proxy_bypass:
+            args.append(f"--proxy-bypass-list={proxy_bypass}")
+    if extra_args:
+        args.extend(extra_args)
+    return args
+
+
 @app.errorhandler(RequestEntityTooLarge)
 def handle_request_too_large(_error):
     message = (
@@ -409,6 +434,345 @@ def issue_code_label(code):
     return ISSUE_CODE_LABELS.get(code or "", code or "-")
 
 
+GENERIC_REGISTER_CONFIGS = {
+    "rin2": {
+        "code": "R.IN.2",
+        "title": "Register Surat Keluar",
+        "description": "Register nomor surat keluar, tujuan, perihal, lampiran, dan keterangan.",
+        "date_field": "letter_date",
+        "chart_field": "recipient",
+        "chart_title": "Grafik Kepada",
+        "fields": [
+            {"name": "letter_number", "label": "Nomor Surat", "type": "text", "required": True},
+            {"name": "letter_date", "label": "Tanggal Surat", "type": "date", "required": True},
+            {"name": "recipient", "label": "Kepada", "type": "text", "required": True},
+            {"name": "subject", "label": "Perihal", "type": "textarea", "required": True},
+            {"name": "attachment", "label": "Lampiran", "type": "text"},
+            {"name": "remarks", "label": "Keterangan", "type": "text", "default": "Arsip"},
+        ],
+    },
+    "rin4": {
+        "code": "R.IN.4",
+        "title": "Register Ekspedisi Surat",
+        "description": "Register ekspedisi surat berdasarkan satker, laporan, tujuan, penerima, dan waktu diterima.",
+        "date_field": "report_date",
+        "chart_field": "recipient",
+        "chart_title": "Grafik Kepada",
+        "fields": [
+            {"name": "satker_name", "label": "Nama Satker", "type": "satker", "required": True},
+            {"name": "report_date", "label": "Tanggal Laporan", "type": "date", "required": True},
+            {"name": "letter_number_date", "label": "No & Tanggal Surat", "type": "textarea", "required": True},
+            {"name": "recipient", "label": "Kepada", "type": "text", "required": True},
+            {"name": "subject", "label": "Perihal", "type": "textarea", "required": True},
+            {"name": "attachment", "label": "Lampiran", "type": "text"},
+            {"name": "received_time", "label": "Waktu Diterima", "type": "datetime"},
+            {"name": "receiver_name", "label": "Nama Penerima", "type": "text"},
+            {"name": "remarks", "label": "Keterangan", "type": "text", "default": "Arsip"},
+        ],
+    },
+    "rin6": {
+        "code": "R.IN.6",
+        "title": "Register Arsip",
+        "description": "Register arsip masuk, kode penyimpanan, lampiran, dan keterangan.",
+        "date_field": "report_date",
+        "chart_field": "storage_code",
+        "chart_title": "Grafik Kode Penyimpanan",
+        "fields": [
+            {"name": "satker_name", "label": "Nama Satker", "type": "satker", "required": True},
+            {"name": "report_date", "label": "Tanggal Laporan", "type": "date", "required": True},
+            {"name": "received_time", "label": "Waktu Terima", "type": "date", "required": True},
+            {"name": "received_from", "label": "Diterima Dari", "type": "text", "required": True},
+            {"name": "letter_number_date", "label": "No & Tanggal Surat", "type": "textarea", "required": True},
+            {"name": "subject", "label": "Perihal", "type": "textarea", "required": True},
+            {"name": "attachment", "label": "Lampiran", "type": "text"},
+            {"name": "storage_code", "label": "Kode Penyimpanan", "type": "text", "default": "Ds.1"},
+            {"name": "remarks", "label": "Keterangan", "type": "text", "default": "Arsip"},
+        ],
+    },
+    "rin7": {
+        "code": "R.IN.7",
+        "title": "Kegiatan Bidang Ideologi, Politik, Pertahanan dan Keamanan, Cegah Tangkal dan Pengawasan Orang Asing, Pengamanan Sumber Daya Organisasi Kejaksaan dan Pengamanan Penanganan Perkara",
+        "description": "Register kegiatan bidang ideologi, politik, pertahanan keamanan, cegah tangkal, pengawasan orang asing, dan pengamanan.",
+        "date_field": "activity_date",
+        "chart_field": "sector",
+        "chart_title": "Grafik Sektor",
+        "fields": [
+            {"name": "sector", "label": "Sektor", "type": "text", "required": True},
+            {"name": "number", "label": "Nomor", "type": "text", "required": True},
+            {"name": "activity_date", "label": "Tanggal", "type": "date", "required": True},
+            {"name": "subject", "label": "Perihal", "type": "textarea", "required": True},
+            {"name": "executor", "label": "Petugas Pelaksana", "type": "text", "required": True},
+            {"name": "result", "label": "Hasil Pelaksanaan Kegiatan", "type": "textarea"},
+            {"name": "remarks", "label": "Keterangan", "type": "text", "default": "Arsip"},
+        ],
+    },
+    "rin8": {
+        "code": "R.IN.8",
+        "title": "Register Kegiatan Bidang Sosial Budaya dan Kemasyarakatan",
+        "description": "Register kegiatan bidang sosial budaya dan kemasyarakatan.",
+        "date_field": "activity_date",
+        "chart_field": "sector",
+        "chart_title": "Grafik Sektor",
+        "fields": [
+            {"name": "sector", "label": "Sektor", "type": "text", "required": True},
+            {"name": "number", "label": "Nomor", "type": "text", "required": True},
+            {"name": "activity_date", "label": "Tanggal", "type": "date", "required": True},
+            {"name": "subject", "label": "Perihal", "type": "textarea", "required": True},
+            {"name": "executor", "label": "Petugas Pelaksana", "type": "text", "required": True},
+            {"name": "result", "label": "Hasil Pelaksanaan Kegiatan", "type": "textarea"},
+            {"name": "remarks", "label": "Keterangan", "type": "text", "default": "Arsip"},
+        ],
+    },
+    "rin9": {
+        "code": "R.IN.9",
+        "title": "Register Kegiatan Bidang Ekonomi dan Keuangan",
+        "description": "Register kegiatan bidang ekonomi dan keuangan.",
+        "date_field": "activity_date",
+        "chart_field": "sector",
+        "chart_title": "Grafik Sektor",
+        "fields": [
+            {"name": "sector", "label": "Sektor", "type": "text", "required": True},
+            {"name": "number", "label": "Nomor", "type": "text", "required": True},
+            {"name": "activity_date", "label": "Tanggal", "type": "date", "required": True},
+            {"name": "subject", "label": "Perihal", "type": "textarea", "required": True},
+            {"name": "executor", "label": "Petugas Pelaksana", "type": "text", "required": True},
+            {"name": "result", "label": "Hasil Pelaksanaan Kegiatan", "type": "textarea"},
+            {"name": "remarks", "label": "Keterangan", "type": "text", "default": "Arsip"},
+        ],
+    },
+    "rin10": {
+        "code": "R.IN.10",
+        "title": "Register Kegiatan Bidang Pengamanan Pembangunan Strategis",
+        "description": "Register kegiatan bidang pengamanan pembangunan strategis.",
+        "date_field": "presentation_date",
+        "chart_field": "sector_activity_fund",
+        "chart_title": "Grafik Sektor/Kegiatan",
+        "fields": [
+            {"name": "sector_activity_fund", "label": "Sektor, Nama Kegiatan & Sumber Dana", "type": "textarea", "required": True},
+            {"name": "agency", "label": "K/L/D/I", "type": "text"},
+            {"name": "budget_ceiling", "label": "Pagu Anggaran", "type": "text"},
+            {"name": "request_letter", "label": "Nomor dan Tanggal Surat Permohonan", "type": "textarea"},
+            {"name": "presentation_place", "label": "Tempat Paparan Pemohon - Tempat", "type": "text"},
+            {"name": "presentation_date", "label": "Tempat Paparan Pemohon - Tanggal", "type": "date", "required": True},
+            {"name": "intelligence_study", "label": "Telaahan Intelijen", "type": "textarea"},
+            {"name": "accepted_reason", "label": "Tindak Lanjut Permohonan - Diterima", "type": "textarea"},
+            {"name": "rejected_reason", "label": "Tindak Lanjut Permohonan - Ditolak", "type": "textarea"},
+            {"name": "walpam_order_number_date", "label": "Surat Perintah Walpam - No/Tanggal", "type": "textarea"},
+            {"name": "walpam_officers", "label": "Surat Perintah Walpam - Nama Petugas", "type": "textarea"},
+            {"name": "contract_value", "label": "Nilai Kontrak", "type": "text"},
+            {"name": "budget_efficiency", "label": "Efisiensi Anggaran", "type": "text"},
+            {"name": "project_completed", "label": "Hasil Pelaksanaan Pengawalan dan Pengamanan - Proyek Selesai", "type": "textarea"},
+            {"name": "project_stopped", "label": "Hasil Pelaksanaan Pengawalan dan Pengamanan - Penghentian", "type": "textarea"},
+            {"name": "working_paper_number_date", "label": "Nomor dan Tanggal Kertas Kerja", "type": "textarea"},
+            {"name": "remarks", "label": "Keterangan", "type": "text", "default": "Arsip"},
+        ],
+    },
+    "rin11": {
+        "code": "R.IN.11",
+        "title": "Register Kegiatan Bidang Teknologi Informasi dan Produksi Intelijen",
+        "description": "Register kegiatan bidang teknologi informasi dan produksi intelijen.",
+        "date_field": "letter_date",
+        "chart_field": "sector",
+        "chart_title": "Grafik Sektor",
+        "fields": [
+            {"name": "sector", "label": "Sektor", "type": "text", "required": True},
+            {"name": "sprint_disposition", "label": "Nomor/Tgl/Perihal Sprint/Disposisi", "type": "textarea", "required": True},
+            {"name": "executor", "label": "Petugas Pelaksana", "type": "text", "required": True},
+            {"name": "result", "label": "Hasil Pelaksanaan Kegiatan", "type": "textarea"},
+            {"name": "remarks", "label": "Keterangan", "type": "text", "default": "Arsip"},
+            {"name": "letter_date", "label": "Tanggal Surat", "type": "date", "required": True},
+        ],
+    },
+    "rin12": {
+        "code": "R.IN.12",
+        "title": "Register Operasi Intelijen Bidang Ideologi, Politik, Pertahanan dan Keamanan, Cegah Tangkal dan Pengawasan Orang Asing, Pengamanan Sumber Daya Organisasi Kejaksaan dan Pengamanan Perkara",
+        "description": "Register operasi intelijen bidang ideologi, politik, pertahanan keamanan, cegah tangkal, pengawasan orang asing, dan pengamanan perkara.",
+        "date_field": "letter_date",
+        "chart_field": "sector",
+        "chart_title": "Grafik Sektor",
+        "fields": [
+            {"name": "sector", "label": "Sektor", "type": "text", "required": True},
+            {"name": "sprint_disposition", "label": "Nomor/Tgl/Perihal Sprint/Disposisi", "type": "textarea", "required": True},
+            {"name": "executor", "label": "Petugas Pelaksana", "type": "text", "required": True},
+            {"name": "result", "label": "Hasil Pelaksanaan Kegiatan", "type": "textarea"},
+            {"name": "remarks", "label": "Keterangan", "type": "text", "default": "Arsip"},
+            {"name": "letter_date", "label": "Tanggal Surat", "type": "date", "required": True},
+        ],
+    },
+    "rin13": {
+        "code": "R.IN.13",
+        "title": "Register Operasi Intelijen Bidang Sosial Budaya dan Kemasyarakatan",
+        "description": "Register operasi intelijen bidang sosial budaya dan kemasyarakatan.",
+        "date_field": "letter_date",
+        "chart_field": "sector",
+        "chart_title": "Grafik Sektor",
+        "fields": [
+            {"name": "sector", "label": "Sektor", "type": "text", "required": True},
+            {"name": "sprint_disposition", "label": "Nomor/Tanggal/Perihal Sprint/Disposisi", "type": "textarea", "required": True},
+            {"name": "executor", "label": "Petugas Pelaksana", "type": "text", "required": True},
+            {"name": "result", "label": "Hasil Pelaksanaan Kegiatan", "type": "textarea"},
+            {"name": "remarks", "label": "Keterangan", "type": "text", "default": "Arsip"},
+            {"name": "letter_date", "label": "Tanggal Surat", "type": "date", "required": True},
+        ],
+    },
+    "rin14": {
+        "code": "R.IN.14",
+        "title": "Register Operasi Intelijen Bidang Ekonomi dan Keuangan",
+        "description": "Register operasi intelijen bidang ekonomi dan keuangan.",
+        "date_field": "letter_date",
+        "chart_field": "sector",
+        "chart_title": "Grafik Sektor",
+        "fields": [
+            {"name": "satker_name", "label": "Nama Satker", "type": "satker", "required": True},
+            {"name": "sector", "label": "Sektor", "type": "text", "required": True},
+            {"name": "letter_number_date", "label": "Nomor Surat/Tanggal", "type": "textarea", "required": True},
+            {"name": "subject", "label": "Perihal", "type": "textarea", "required": True},
+            {"name": "officer_name", "label": "Nama Petugas", "type": "text", "required": True},
+            {"name": "result", "label": "Hasil", "type": "textarea"},
+            {"name": "letter_date", "label": "Tanggal Surat", "type": "date", "required": True},
+        ],
+    },
+    "rin15": {
+        "code": "R.IN.15",
+        "title": "Register Operasi Intelijen Bidang Pengamanan Pembangunan Strategis",
+        "description": "Register operasi intelijen bidang pengamanan pembangunan strategis.",
+        "date_field": "letter_date",
+        "chart_field": "sector",
+        "chart_title": "Grafik Sektor",
+        "fields": [
+            {"name": "sector", "label": "Sektor", "type": "text", "required": True},
+            {"name": "letter_number", "label": "Nomor Surat", "type": "text", "required": True},
+            {"name": "letter_date", "label": "Tanggal", "type": "date", "required": True},
+            {"name": "subject", "label": "Perihal", "type": "textarea", "required": True},
+            {"name": "officer_name", "label": "Nama Petugas", "type": "text", "required": True},
+            {"name": "result", "label": "Hasil", "type": "textarea"},
+        ],
+    },
+    "rin16": {
+        "code": "R.IN.16",
+        "title": "Register Operasi Intelijen Bidang Teknologi Informasi dan Produksi Intelijen",
+        "description": "Register operasi intelijen bidang teknologi informasi dan produksi intelijen.",
+        "date_field": "letter_date",
+        "chart_field": "sector",
+        "chart_title": "Grafik Sektor",
+        "fields": [
+            {"name": "sector", "label": "Sektor", "type": "text", "required": True},
+            {"name": "letter_number", "label": "Nomor Surat", "type": "text", "required": True},
+            {"name": "letter_date", "label": "Tanggal", "type": "date", "required": True},
+            {"name": "subject", "label": "Perihal", "type": "textarea", "required": True},
+            {"name": "officer_name", "label": "Nama Petugas", "type": "text", "required": True},
+            {"name": "result", "label": "Hasil", "type": "textarea"},
+        ],
+    },
+    "rin17": {
+        "code": "R.IN.17",
+        "title": "Register Berita Masuk",
+        "description": "Register berita masuk, pengirim, tujuan, waktu diterima, jumlah halaman, dan petugas.",
+        "date_field": "entry_date",
+        "chart_field": "sender",
+        "chart_title": "Grafik Dari",
+        "fields": [
+            {"name": "entry_date", "label": "Tanggal", "type": "date", "required": True},
+            {"name": "news_number", "label": "Nomor", "type": "text", "required": True},
+            {"name": "news_date", "label": "Tanggal Berita", "type": "date", "required": True},
+            {"name": "sender", "label": "Dari", "type": "text", "required": True},
+            {"name": "recipient", "label": "Kepada", "type": "text", "required": True},
+            {"name": "subject", "label": "Perihal", "type": "textarea", "required": True},
+            {"name": "received_datetime", "label": "Tanggal/Jam Diterima", "type": "datetime"},
+            {"name": "page_count", "label": "Jumlah Halaman", "type": "number"},
+            {"name": "officer_name", "label": "Nama Petugas", "type": "text"},
+        ],
+    },
+    "rin18": {
+        "code": "R.IN.18",
+        "title": "Register Berita Keluar",
+        "description": "Register berita keluar, pengirim, tujuan, waktu dikirim, jumlah halaman, dan petugas.",
+        "date_field": "entry_date",
+        "chart_field": "recipient",
+        "chart_title": "Grafik Kepada",
+        "fields": [
+            {"name": "entry_date", "label": "Tanggal", "type": "date", "required": True},
+            {"name": "news_number", "label": "Nomor", "type": "text", "required": True},
+            {"name": "news_date", "label": "Tanggal Berita", "type": "date", "required": True},
+            {"name": "sender", "label": "Dari", "type": "text", "required": True},
+            {"name": "recipient", "label": "Kepada", "type": "text", "required": True},
+            {"name": "subject", "label": "Perihal", "type": "textarea", "required": True},
+            {"name": "sent_datetime", "label": "Tanggal/Jam Dikirim", "type": "datetime"},
+            {"name": "page_count", "label": "Jumlah Halaman", "type": "number"},
+            {"name": "officer_name", "label": "Nama Petugas", "type": "text"},
+        ],
+    },
+    "rin19": {
+        "code": "R.IN.19",
+        "title": "Register Telaahan Intelijen",
+        "description": "Register telaahan intelijen berdasarkan pembuat, perihal, tindak lanjut, dan keterangan.",
+        "date_field": "letter_date",
+        "chart_field": "maker",
+        "chart_title": "Grafik Pembuat",
+        "fields": [
+            {"name": "satker_name", "label": "Nama Satker", "type": "satker", "required": True},
+            {"name": "letter_date", "label": "Tanggal Surat", "type": "date", "required": True},
+            {"name": "maker", "label": "Pembuat", "type": "text", "required": True},
+            {"name": "subject", "label": "Perihal", "type": "textarea", "required": True},
+            {"name": "follow_up", "label": "Tindak Lanjut", "type": "textarea"},
+            {"name": "remarks", "label": "Keterangan", "type": "text", "default": "Arsip"},
+        ],
+    },
+    "rin20": {
+        "code": "R.IN.20",
+        "title": "Register Ekspedisi Berita",
+        "description": "Register ekspedisi berita, tujuan, penerima, dan keterangan.",
+        "date_field": "letter_date",
+        "chart_field": "recipient",
+        "chart_title": "Grafik Kepada",
+        "fields": [
+            {"name": "satker_name", "label": "Nama Satker", "type": "satker", "required": True},
+            {"name": "news_number", "label": "Nomor Berita", "type": "text", "required": True},
+            {"name": "letter_date", "label": "Tanggal Surat", "type": "date", "required": True},
+            {"name": "recipient", "label": "Kepada", "type": "text", "required": True},
+            {"name": "receiver_signature", "label": "Nama & TTD Penerima", "type": "textarea"},
+            {"name": "remarks", "label": "Keterangan", "type": "text", "default": "Arsip"},
+        ],
+    },
+    "rin21": {
+        "code": "R.IN.21",
+        "title": "Register Tamu Pos Pelayanan Hukum dan Penerimaan Pengaduan Masyarakat (PPH & PPM)",
+        "description": "Register tamu Pos Pelayanan Hukum dan Penerimaan Pengaduan Masyarakat.",
+        "date_field": "visit_time",
+        "chart_field": "organization_name",
+        "chart_title": "Grafik Organisasi",
+        "fields": [
+            {"name": "receiver_officer", "label": "Nama Petugas Penerima Laporan", "type": "text", "required": True},
+            {"name": "visit_time", "label": "Waktu", "type": "datetime", "required": True},
+            {"name": "identity", "label": "Identitas", "type": "textarea", "required": True},
+            {"name": "organization_name", "label": "Nama Organisasi", "type": "text"},
+            {"name": "information", "label": "Informasi yang Disampaikan", "type": "textarea", "required": True},
+            {"name": "submitted_document", "label": "Surat/Dokumen yang Disampaikan", "type": "textarea"},
+            {"name": "signature", "label": "Tanda Tangan", "type": "text"},
+            {"name": "remarks", "label": "Keterangan", "type": "text", "default": "Arsip"},
+        ],
+    },
+    "rin22": {
+        "code": "R.IN.22",
+        "title": "Register Pelaksanaan Kegiatan Penerangan Hukum/Penyuluhan Hukum",
+        "description": "Register kegiatan penerangan hukum/penyuluhan hukum, sasaran, waktu, tempat, materi, dan peserta.",
+        "date_field": "activity_time",
+        "chart_field": "activity_target",
+        "chart_title": "Grafik Sasaran Kegiatan",
+        "fields": [
+            {"name": "satker_name", "label": "Nama Satker", "type": "satker", "required": True},
+            {"name": "warrant_letter", "label": "Surat Perintah", "type": "text", "required": True},
+            {"name": "activity_target", "label": "Sasaran Kegiatan", "type": "text", "required": True},
+            {"name": "activity_time", "label": "Waktu", "type": "date", "required": True},
+            {"name": "place", "label": "Tempat", "type": "text", "required": True},
+            {"name": "material", "label": "Materi", "type": "textarea", "required": True},
+            {"name": "participant_count", "label": "Jumlah Peserta", "type": "number"},
+            {"name": "remarks", "label": "Keterangan", "type": "text", "default": "Arsip"},
+        ],
+    },
+}
+
+
 def format_time_value(value):
     if not value:
         return "-"
@@ -453,7 +817,23 @@ def excel_column_name(index):
     return name
 
 
-def make_xlsx(headers, rows, sheet_name="Sheet1"):
+def nihil_row_values(column_count):
+    row = [""] * max(1, int(column_count or 1))
+    letters = list("NIHIL")
+    start = max(0, (len(row) - len(letters)) // 2)
+    for offset, letter in enumerate(letters):
+        if start + offset < len(row):
+            row[start + offset] = letter
+    return row
+
+
+def nihil_table_rows_values(column_count, row_count=7):
+    rows = [[""] * max(1, int(column_count or 1)) for _ in range(max(3, row_count))]
+    rows[len(rows) // 2] = nihil_row_values(column_count)
+    return rows
+
+
+def make_xlsx(headers, rows, sheet_name="Sheet1", title=None, period_text=None):
     def cell_xml(row_number, col_number, value, style_id=0):
         cell_ref = f"{excel_column_name(col_number)}{row_number}"
         text = "" if value is None else str(value)
@@ -464,22 +844,110 @@ def make_xlsx(headers, rows, sheet_name="Sheet1"):
         )
 
     sheet_rows = []
+    data_total = len(rows or [])
+    current_row = 1
+    if title:
+        sheet_rows.append(f'<row r="{current_row}">' + cell_xml(current_row, 1, title, 1) + "</row>")
+        current_row += 1
+    if period_text:
+        sheet_rows.append(f'<row r="{current_row}">' + cell_xml(current_row, 1, f"Bulan : {period_text}", 1) + "</row>")
+        current_row += 1
+    header_row = current_row
     sheet_rows.append(
-        '<row r="1">' + "".join(
-            cell_xml(1, index, header, 1) for index, header in enumerate(headers, 1)
+        f'<row r="{header_row}">' + "".join(
+            cell_xml(header_row, index, header, 1) for index, header in enumerate(headers, 1)
         ) + "</row>"
     )
-    for row_index, row in enumerate(rows, 2):
+    if not rows:
+        rows = nihil_table_rows_values(len(headers))
+    for row_index, row in enumerate(rows, header_row + 1):
         sheet_rows.append(
             f'<row r="{row_index}">' + "".join(
                 cell_xml(row_index, col_index, value)
                 for col_index, value in enumerate(row, 1)
             ) + "</row>"
         )
+    signature_start_row = len(sheet_rows) + 3
+    try:
+        kajari = fetch_one("SELECT * FROM signatories WHERE position_code='kajari'") or {}
+        kasi = fetch_one("SELECT * FROM signatories WHERE position_code='kasi_intel'") or {}
+    except Exception:
+        kajari, kasi = {}, {}
+    def excel_acting_signer(base_signer, prefix):
+        if request.args.get(f"use_{prefix}") != "1":
+            return base_signer
+        acting_type = str(request.args.get(f"{prefix}_type") or "").strip().lower()
+        acting_label = "Plt." if acting_type == "plt" else "Plh." if acting_type == "plh" else ""
+        base_position = str(base_signer.get("position_name") or "").strip()
+        signer_name = str(request.args.get(f"{prefix}_name") or base_signer.get("full_name") or "").strip()
+        signer_position_detail = str(request.args.get(f"{prefix}_position") or "").strip()
+        signer_nip = str(request.args.get(f"{prefix}_nip") or "").strip()
+        rank_nip = signer_position_detail
+        if signer_nip:
+            rank_nip = f"{rank_nip} NIP. {signer_nip}".strip()
+        result = dict(base_signer)
+        result.update(
+            full_name=signer_name or "-",
+            position_name=f"{acting_label} {base_position}".strip() if acting_label else base_position or "-",
+            rank_nip=rank_nip or "-",
+        )
+        return result
+    kajari = excel_acting_signer(kajari, "acting_kajari")
+    kasi = excel_acting_signer(kasi, "acting_kasi")
+    signature_date_raw = request.args.get("signature_date", "").strip()
+    try:
+        signature_date = datetime.strptime(signature_date_raw, "%Y-%m-%d").date() if signature_date_raw else date.today()
+    except ValueError:
+        signature_date = date.today()
+    signature_date_text = f"Singaraja, {format_indonesian_date(signature_date)}"
+    col_count = max(len(headers), 9)
+    left_col = 2
+    middle_col = max(3, col_count // 2)
+    right_col = max(middle_col + 2, col_count - 2)
+
+    signature_rows = [
+        (signature_start_row, {
+            left_col: "Mengetahui",
+            middle_col: "Rekapitulasi",
+            right_col: signature_date_text,
+        }, 1),
+        (signature_start_row + 1, {
+            left_col: kajari.get("position_name") or "Kepala Kejaksaan Negeri Buleleng",
+            middle_col: "Sisa bulan Lalu :",
+            right_col: kasi.get("position_name") or "Kasi Intelijen",
+        }, 0),
+        (signature_start_row + 2, {
+            middle_col: f"Masuk Bulan laporan : {data_total}",
+        }, 0),
+        (signature_start_row + 3, {
+            middle_col: f"Jumlah : {data_total}",
+        }, 0),
+        (signature_start_row + 4, {
+            middle_col: "Diselesaikan :",
+        }, 0),
+        (signature_start_row + 5, {
+            middle_col: "Sisa Bulan Laporan :",
+        }, 0),
+        (signature_start_row + 8, {
+            left_col: kajari.get("full_name") or "-",
+            right_col: kasi.get("full_name") or "-",
+        }, 1),
+        (signature_start_row + 9, {
+            left_col: kajari.get("rank_nip") or "-",
+            right_col: kasi.get("rank_nip") or "-",
+        }, 0),
+    ]
+    for row_number, values, default_style in signature_rows:
+        sheet_rows.append(
+            f'<row r="{row_number}">' + "".join(
+                cell_xml(row_number, col_number, value, default_style)
+                for col_number, value in sorted(values.items())
+            ) + "</row>"
+        )
 
     column_widths = "".join(
         f'<col min="{index}" max="{index}" width="{width}" customWidth="1"/>'
-        for index, width in enumerate([7, 28, 26, 28, 18, 35, 42, 42, 20], 1)
+        for index, width in enumerate(([7, 28, 26, 28, 18, 35, 42, 42, 20] + [24] * max(0, len(headers) - 9)), 1)
     )
     sheet_xml = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -538,6 +1006,1230 @@ def make_xlsx(headers, rows, sheet_name="Sheet1"):
         archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
     output.seek(0)
     return output
+
+
+def generic_register_config(slug):
+    config = GENERIC_REGISTER_CONFIGS.get(slug)
+    if not config:
+        abort(404)
+    return config
+
+
+def generic_register_payload(config, source=None):
+    organization = fetch_one("SELECT organization_name FROM organization_settings WHERE id=1") or {}
+    organization_name = organization.get("organization_name") or "Kejaksaan Negeri Buleleng"
+    source = source or request.form
+    data = {}
+    for field in config["fields"]:
+        name = field["name"]
+        if field.get("type") == "satker":
+            value = (source.get(name) or organization_name).strip()
+        else:
+            value = (source.get(name) or field.get("default") or "").strip()
+        if field.get("type") in {"date", "datetime"} and not value and field.get("required"):
+            value = date.today().isoformat()
+        data[name] = value
+    return data
+
+
+def generic_register_entry_date(config, payload):
+    raw_value = payload.get(config.get("date_field") or "")
+    if not raw_value:
+        return None
+    try:
+        return datetime.strptime(raw_value[:10], "%Y-%m-%d").date().isoformat()
+    except ValueError:
+        return None
+
+
+def generic_register_display_value(field, payload):
+    value = payload.get(field["name"]) or "-"
+    if field.get("type") == "date" and value != "-":
+        try:
+            return datetime.strptime(value[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+        except ValueError:
+            return value
+    if field.get("type") == "datetime" and value != "-":
+        try:
+            return datetime.strptime(value[:16], "%Y-%m-%dT%H:%M").strftime("%d/%m/%Y %H.%M")
+        except ValueError:
+            return value.replace("T", " ")
+    return value
+
+
+def generic_register_visible_fields(config):
+    if config.get("code") != "R.IN.10":
+        return config["fields"]
+    hidden_names = {
+        "presentation_date",
+        "rejected_reason",
+        "walpam_officers",
+        "project_stopped",
+    }
+    return [field for field in config["fields"] if field["name"] not in hidden_names]
+
+
+def generic_register_display_value_by_name(config, name, payload):
+    field = next((item for item in config["fields"] if item["name"] == name), {"name": name, "type": "text"})
+    return generic_register_display_value(field, payload)
+
+
+def rin10_grouped_headers():
+    return [
+        {"label": "Sektor, Nama Kegiatan & Sumber Dana", "name": "sector_activity_fund", "rowspan": 2},
+        {"label": "K/L/D/I", "name": "agency", "rowspan": 2},
+        {"label": "Pagu Anggaran", "name": "budget_ceiling", "rowspan": 2},
+        {"label": "Nomor dan Tanggal Surat Permohonan", "name": "request_letter", "rowspan": 2},
+        {"label": "Tempat Paparan Pemohon", "children": [
+            {"label": "Tempat", "name": "presentation_place"},
+            {"label": "Tanggal", "name": "presentation_date"},
+        ]},
+        {"label": "Telaahan Intelijen", "name": "intelligence_study", "rowspan": 2},
+        {"label": "Tindak Lanjut Permohonan", "children": [
+            {"label": "Diterima", "name": "accepted_reason"},
+            {"label": "Ditolak", "name": "rejected_reason"},
+        ]},
+        {"label": "Surat Perintah Walpam", "children": [
+            {"label": "No/Tanggal", "name": "walpam_order_number_date"},
+            {"label": "Nama Petugas", "name": "walpam_officers"},
+        ]},
+        {"label": "Nilai Kontrak", "name": "contract_value", "rowspan": 2},
+        {"label": "Efisiensi Anggaran", "name": "budget_efficiency", "rowspan": 2},
+        {"label": "Hasil Pelaksanaan Pengawalan dan Pengamanan", "children": [
+            {"label": "Proyek Selesai", "name": "project_completed"},
+            {"label": "Penghentian", "name": "project_stopped"},
+        ]},
+        {"label": "Nomor dan Tanggal Kertas Kerja", "name": "working_paper_number_date", "rowspan": 2},
+        {"label": "Keterangan", "name": "remarks", "rowspan": 2},
+    ]
+
+
+def rin10_leaf_fields():
+    leaves = []
+    for item in rin10_grouped_headers():
+        if item.get("name"):
+            leaves.append(item["name"])
+        else:
+            leaves.extend(child["name"] for child in item.get("children", []))
+    return leaves
+
+
+def register_export_period_text(month=None, year=None, fallback="-"):
+    month = (month if month is not None else request.args.get("month", "")).strip()
+    year = (year if year is not None else request.args.get("year", "")).strip()
+    if month.isdigit() and year.isdigit() and 1 <= int(month) <= 12:
+        return f"{MONTH_NAMES_ID[int(month)]} {year}"
+    return year if year.isdigit() else fallback
+
+
+def generic_register_filters(config):
+    params = [config["code"]]
+    conditions = ["entries.register_code=%s"]
+    search = request.args.get("q", "").strip()[:150]
+    month = request.args.get("month", "").strip()
+    year = request.args.get("year", "").strip()
+    if search:
+        conditions.append("(entries.payload LIKE %s OR entries.chart_label LIKE %s OR users.full_name LIKE %s)")
+        params.extend([f"%{search}%"] * 3)
+    if month.isdigit() and 1 <= int(month) <= 12:
+        conditions.append("MONTH(entries.entry_date)=%s")
+        params.append(int(month))
+    if year.isdigit():
+        conditions.append("YEAR(entries.entry_date)=%s")
+        params.append(int(year))
+    return "WHERE " + " AND ".join(conditions), tuple(params), search, month, year
+
+
+@app.route("/register-intelijen/<slug>")
+@login_required
+def register_intelijen_generic(slug):
+    config = generic_register_config(slug)
+    where_clause, params, search, month, year = generic_register_filters(config)
+    chart_month = request.args.get("chart_month", "all").strip() or "all"
+    try:
+        page = max(1, int(request.args.get("page", "1")))
+    except ValueError:
+        page = 1
+    per_page = 10
+    current_year = date.today().year
+    current_month = date.today().month
+    chart_conditions = ["register_code=%s", "YEAR(entry_date)=%s"]
+    chart_params = [config["code"], current_year]
+    if chart_month.isdigit() and 1 <= int(chart_month) <= 12:
+        chart_conditions.append("MONTH(entry_date)=%s")
+        chart_params.append(int(chart_month))
+        chart_month_name = MONTH_NAMES_ID[int(chart_month)]
+    else:
+        chart_month = "all"
+        chart_month_name = "Semua bulan"
+    chart_rows = fetch_all(
+        f"""SELECT COALESCE(NULLIF(TRIM(chart_label), ''), 'Tanpa Data') AS label, COUNT(*) AS total
+            FROM register_intelijen_generic_entries
+            WHERE {' AND '.join(chart_conditions)}
+            GROUP BY label
+            ORDER BY total DESC, label ASC
+            LIMIT 12""",
+        tuple(chart_params),
+    )
+    max_chart_total = max([int(row["total"] or 0) for row in chart_rows] or [0])
+    total_current_year = int(fetch_one(
+        "SELECT COUNT(*) AS total FROM register_intelijen_generic_entries WHERE register_code=%s AND YEAR(entry_date)=%s",
+        (config["code"], current_year),
+    )["total"] or 0)
+    total_current_month = int(fetch_one(
+        """SELECT COUNT(*) AS total FROM register_intelijen_generic_entries
+           WHERE register_code=%s AND YEAR(entry_date)=%s AND MONTH(entry_date)=%s""",
+        (config["code"], current_year, current_month),
+    )["total"] or 0)
+    filtered_total = int(fetch_one(
+        f"""SELECT COUNT(*) AS total
+            FROM register_intelijen_generic_entries entries
+            JOIN users ON users.id=entries.created_by
+            {where_clause}""",
+        params,
+    )["total"] or 0)
+    total_pages = max(1, (filtered_total + per_page - 1) // per_page)
+    page = min(page, total_pages)
+    entries = fetch_all(
+        f"""SELECT entries.*, users.full_name AS creator_full_name
+            FROM register_intelijen_generic_entries entries
+            JOIN users ON users.id=entries.created_by
+            {where_clause}
+            ORDER BY entries.entry_date DESC, entries.id DESC
+            LIMIT %s OFFSET %s""",
+        tuple(list(params) + [per_page, (page - 1) * per_page]),
+    )
+    for entry in entries:
+        try:
+            entry["payload_data"] = json.loads(entry.get("payload") or "{}")
+        except json.JSONDecodeError:
+            entry["payload_data"] = {}
+    years = fetch_all(
+        """SELECT DISTINCT YEAR(entry_date) AS report_year
+           FROM register_intelijen_generic_entries
+           WHERE register_code=%s AND entry_date IS NOT NULL
+           ORDER BY report_year DESC""",
+        (config["code"],),
+    )
+    organization_name = (fetch_one("SELECT organization_name FROM organization_settings WHERE id=1") or {}).get("organization_name") or "Kejaksaan Negeri Buleleng"
+    return render_template(
+        "register_intelijen_generic_list.html",
+        active=f"register_intelijen_{slug}",
+        slug=slug,
+        config=config,
+        entries=entries,
+        search=search,
+        filter_month=month,
+        filter_year=year,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+        filtered_total=filtered_total,
+        month_names=MONTH_NAMES_ID,
+        years=sorted({int(row["report_year"]) for row in years if row["report_year"]} | {current_year}, reverse=True),
+        current_year=current_year,
+        current_month=current_month,
+        current_month_name=MONTH_NAMES_ID[current_month],
+        chart_month=chart_month,
+        chart_month_name=chart_month_name,
+        chart_rows=chart_rows,
+        max_chart_total=max_chart_total,
+        total_current_year=total_current_year,
+        total_current_month=total_current_month,
+        organization_name=organization_name,
+        display_value=generic_register_display_value,
+        visible_fields=generic_register_visible_fields(config),
+        display_value_by_name=generic_register_display_value_by_name,
+        rin10_grouped_headers=rin10_grouped_headers(),
+        rin10_leaf_fields=rin10_leaf_fields(),
+        today=date.today().isoformat(),
+    )
+
+
+@app.route("/register-intelijen/<slug>/create", methods=["GET", "POST"])
+@login_required
+def create_register_intelijen_generic(slug):
+    config = generic_register_config(slug)
+    if request.method == "POST":
+        data = generic_register_payload(config)
+        missing = [field["label"] for field in config["fields"] if field.get("required") and not data.get(field["name"])]
+        if missing:
+            flash("Field wajib diisi: " + ", ".join(missing), "error")
+        else:
+            entry_date = generic_register_entry_date(config, data)
+            chart_label = data.get(config.get("chart_field") or "") or ""
+            with get_db().cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO register_intelijen_generic_entries
+                       (register_code, entry_date, chart_label, payload, created_by)
+                       VALUES (%s,%s,%s,%s,%s)""",
+                    (config["code"], entry_date, chart_label, json.dumps(data, ensure_ascii=False), session["user_id"]),
+                )
+            flash(f"Data {config['code']} berhasil disimpan.", "success")
+            return redirect(url_for("register_intelijen_generic", slug=slug))
+    else:
+        data = generic_register_payload(config, {})
+    return render_template(
+        "register_intelijen_generic_form.html",
+        active=f"register_intelijen_{slug}",
+        slug=slug,
+        config=config,
+        data=data,
+        entry=None,
+    )
+
+
+@app.route("/register-intelijen/<slug>/<int:entry_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_register_intelijen_generic(slug, entry_id):
+    config = generic_register_config(slug)
+    entry = fetch_one(
+        "SELECT * FROM register_intelijen_generic_entries WHERE id=%s AND register_code=%s",
+        (entry_id, config["code"]),
+    )
+    if not entry:
+        flash(f"Data {config['code']} tidak ditemukan.", "error")
+        return redirect(url_for("register_intelijen_generic", slug=slug))
+    if session.get("role") != "admin" and entry["created_by"] != session["user_id"]:
+        flash(f"Anda tidak dapat mengubah data {config['code']} ini.", "error")
+        return redirect(url_for("register_intelijen_generic", slug=slug))
+    if request.method == "POST":
+        data = generic_register_payload(config)
+        missing = [field["label"] for field in config["fields"] if field.get("required") and not data.get(field["name"])]
+        if missing:
+            flash("Field wajib diisi: " + ", ".join(missing), "error")
+        else:
+            entry_date = generic_register_entry_date(config, data)
+            chart_label = data.get(config.get("chart_field") or "") or ""
+            with get_db().cursor() as cursor:
+                cursor.execute(
+                    """UPDATE register_intelijen_generic_entries
+                       SET entry_date=%s, chart_label=%s, payload=%s
+                       WHERE id=%s AND register_code=%s""",
+                    (entry_date, chart_label, json.dumps(data, ensure_ascii=False), entry_id, config["code"]),
+                )
+            flash(f"Data {config['code']} berhasil diperbarui.", "success")
+            return redirect(url_for("register_intelijen_generic", slug=slug))
+    else:
+        try:
+            data = json.loads(entry.get("payload") or "{}")
+        except json.JSONDecodeError:
+            data = {}
+        data = generic_register_payload(config, data)
+    return render_template(
+        "register_intelijen_generic_form.html",
+        active=f"register_intelijen_{slug}",
+        slug=slug,
+        config=config,
+        data=data,
+        entry=entry,
+    )
+
+
+@app.post("/register-intelijen/<slug>/<int:entry_id>/delete")
+@login_required
+def delete_register_intelijen_generic(slug, entry_id):
+    config = generic_register_config(slug)
+    entry = fetch_one(
+        "SELECT id,created_by FROM register_intelijen_generic_entries WHERE id=%s AND register_code=%s",
+        (entry_id, config["code"]),
+    )
+    if not entry:
+        flash(f"Data {config['code']} tidak ditemukan.", "error")
+    elif session.get("role") != "admin" and entry["created_by"] != session["user_id"]:
+        flash(f"Anda tidak dapat menghapus data {config['code']} ini.", "error")
+    else:
+        with get_db().cursor() as cursor:
+            cursor.execute("DELETE FROM register_intelijen_generic_entries WHERE id=%s AND register_code=%s", (entry_id, config["code"]))
+        flash(f"Data {config['code']} berhasil dihapus.", "success")
+    return redirect(url_for("register_intelijen_generic", slug=slug))
+
+
+@app.get("/register-intelijen/<slug>/export-excel")
+@login_required
+def export_register_intelijen_generic_excel(slug):
+    config = generic_register_config(slug)
+    where_clause, params, *_ = generic_register_filters(config)
+    entries = fetch_all(
+        f"""SELECT entries.*, users.full_name AS creator_full_name
+            FROM register_intelijen_generic_entries entries
+            JOIN users ON users.id=entries.created_by
+            {where_clause}
+            ORDER BY entries.entry_date ASC, entries.id ASC""",
+        params,
+    )
+    if config["code"] == "R.IN.10":
+        headers = ["No"]
+        for item in rin10_grouped_headers():
+            if item.get("children"):
+                headers.extend([f"{item['label']} - {child['label']}" for child in item["children"]])
+            else:
+                headers.append(item["label"])
+        excel_field_names = rin10_leaf_fields()
+    else:
+        visible_fields = generic_register_visible_fields(config)
+        headers = ["No"] + [field["label"] for field in visible_fields]
+        excel_field_names = [field["name"] for field in visible_fields]
+    rows = []
+    for index, entry in enumerate(entries, 1):
+        try:
+            payload = json.loads(entry.get("payload") or "{}")
+        except json.JSONDecodeError:
+            payload = {}
+        rows.append([index] + [generic_register_display_value_by_name(config, field_name, payload) for field_name in excel_field_names])
+    workbook = make_xlsx(
+        headers,
+        rows,
+        config["code"],
+        title=f"{config['code']} {config['title'].upper()}",
+        period_text=register_export_period_text(),
+    )
+    return send_file(
+        workbook,
+        as_attachment=True,
+        download_name=f"{config['code'].replace('.', '')}-{date.today().strftime('%Y%m%d')}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.get("/register-intelijen/<slug>/export-pdf")
+@login_required
+def export_register_intelijen_generic_pdf(slug):
+    config = generic_register_config(slug)
+    where_clause, params, *_ = generic_register_filters(config)
+    entries = fetch_all(
+        f"""SELECT entries.*, users.full_name AS creator_full_name
+            FROM register_intelijen_generic_entries entries
+            JOIN users ON users.id=entries.created_by
+            {where_clause}
+            ORDER BY entries.entry_date ASC, entries.id ASC""",
+        params,
+    )
+    month = request.args.get("month", "").strip()
+    year = request.args.get("year", "").strip()
+    period_text = f"{MONTH_NAMES_ID[int(month)]} {year}" if month.isdigit() and year.isdigit() and 1 <= int(month) <= 12 else (year if year.isdigit() else "-")
+    use_scan_signature = request.args.get("use_scan_signature") == "1"
+    use_digital_stamp = request.args.get("use_digital_stamp") == "1"
+    use_acting_kajari = request.args.get("use_acting_kajari") == "1"
+    use_acting_kasi = request.args.get("use_acting_kasi") == "1"
+    signature_date_raw = request.args.get("signature_date", "").strip()
+    try:
+        signature_date = datetime.strptime(signature_date_raw, "%Y-%m-%d").date() if signature_date_raw else date.today()
+    except ValueError:
+        signature_date = date.today()
+    organization = fetch_one("SELECT * FROM organization_settings WHERE id=1") or {}
+    kajari = fetch_one("SELECT * FROM signatories WHERE position_code='kajari'") or {}
+    kasi = fetch_one("SELECT * FROM signatories WHERE position_code='kasi_intel'") or {}
+
+    def acting_signer(base_signer, prefix, enabled):
+        if not enabled:
+            return base_signer
+        acting_type = str(request.args.get(f"{prefix}_type") or "").strip().lower()
+        acting_label = "Plt." if acting_type == "plt" else "Plh." if acting_type == "plh" else ""
+        base_position = str(base_signer.get("position_name") or "").strip()
+        signer_name = str(request.args.get(f"{prefix}_name") or base_signer.get("full_name") or "").strip()
+        signer_position_detail = str(request.args.get(f"{prefix}_position") or "").strip()
+        signer_nip = str(request.args.get(f"{prefix}_nip") or "").strip()
+        rank_nip = signer_position_detail
+        if signer_nip:
+            rank_nip = f"{rank_nip} NIP. {signer_nip}".strip()
+        result = dict(base_signer)
+        result.update(
+            full_name=signer_name or "-",
+            position_name=f"{acting_label} {base_position}".strip() if acting_label else base_position or "-",
+            rank_nip=rank_nip or "-",
+            signature_image=None,
+        )
+        return result
+
+    kajari = acting_signer(kajari, "acting_kajari", use_acting_kajari)
+    kasi = acting_signer(kasi, "acting_kasi", use_acting_kasi)
+
+    def safe_upload_path(base_dir, filename):
+        if not filename:
+            return None
+        path = (base_dir / filename).resolve()
+        try:
+            path.relative_to(base_dir.resolve())
+        except ValueError:
+            return None
+        return path if path.is_file() else None
+
+    def pdf_image(path, max_width, max_height):
+        if not path:
+            return Spacer(1, max_height)
+        try:
+            with PILImage.open(path) as image:
+                width, height = image.size
+        except Exception:
+            return Spacer(1, max_height)
+        if not width or not height:
+            return Spacer(1, max_height)
+        ratio = min(max_width / width, max_height / height)
+        return Image(str(path), width=width * ratio, height=height * ratio)
+
+    def signature_image_block(scan_path, stamp_path=None):
+        flowables = []
+        if stamp_path:
+            flowables.append(pdf_image(stamp_path, 2.35 * cm, 2.35 * cm))
+        if scan_path:
+            flowables.append(pdf_image(scan_path, 6.25 * cm, 2.75 * cm))
+        if not flowables:
+            flowables = [Spacer(1, 2.75 * cm)]
+        image_block = Table([flowables], colWidths=([2.65 * cm] if stamp_path else []) + ([6.9 * cm] if scan_path else [6.9 * cm]), hAlign="CENTER")
+        image_block.setStyle(TableStyle([
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        return image_block
+
+    output = BytesIO()
+    page_size = landscape((8.5 * inch, 13 * inch))
+    page_width, page_height = page_size
+    title_text = f"{config['code']} {config['title'].upper()}"
+    title_canvas_style = ParagraphStyle(
+        "GenericRegisterCanvasTitle",
+        fontName=PDF_FONT_BOLD,
+        fontSize=12,
+        leading=13.5,
+        alignment=TA_LEFT,
+        spaceBefore=0,
+        spaceAfter=0,
+    )
+    header_width = page_width - 2 * cm
+    title_height = Paragraph(escape(title_text), title_canvas_style).wrap(header_width, 2.2 * cm)[1]
+    dynamic_top_margin = max(2.75 * cm, 1.45 * cm + title_height + 0.86 * cm)
+    document = SimpleDocTemplate(output, pagesize=page_size, rightMargin=1*cm, leftMargin=1*cm, topMargin=dynamic_top_margin, bottomMargin=1.1*cm, allowSplitting=True)
+    styles = getSampleStyleSheet()
+    cell_style = ParagraphStyle("GenericCell", parent=styles["Normal"], fontName=PDF_FONT_NAME, fontSize=8, leading=9.4, splitLongWords=True)
+    header_style = ParagraphStyle("GenericHeader", parent=cell_style, fontName=PDF_FONT_BOLD, alignment=TA_CENTER)
+    signature_style = ParagraphStyle("GenericSignature", parent=styles["Normal"], fontName=PDF_FONT_NAME, fontSize=10, leading=12, alignment=TA_CENTER, spaceBefore=0, spaceAfter=0)
+    signature_name_style = ParagraphStyle("GenericSignatureName", parent=signature_style, fontName=PDF_FONT_BOLD)
+    recap_title_style = ParagraphStyle("GenericRecapTitle", parent=signature_style, fontName=PDF_FONT_BOLD, alignment=TA_LEFT)
+    recap_style = ParagraphStyle("GenericRecap", parent=signature_style, alignment=TA_LEFT)
+    def pdf_cell(value, style=cell_style):
+        return Paragraph(escape(str(value if value is not None else "-")).replace("\n", "<br/>"), style)
+    if config["code"] == "R.IN.10":
+        top_header = [pdf_cell("No", header_style)]
+        sub_header = [pdf_cell("", header_style)]
+        for item in rin10_grouped_headers():
+            if item.get("children"):
+                top_header.append(pdf_cell(item["label"], header_style))
+                top_header.extend([pdf_cell("", header_style) for _ in item["children"][1:]])
+                sub_header.extend([pdf_cell(child["label"], header_style) for child in item["children"]])
+            else:
+                top_header.append(pdf_cell(item["label"], header_style))
+                sub_header.append(pdf_cell("", header_style))
+        table_data = [top_header, sub_header]
+        leaf_names = rin10_leaf_fields()
+        for index, entry in enumerate(entries, 1):
+            try:
+                payload = json.loads(entry.get("payload") or "{}")
+            except json.JSONDecodeError:
+                payload = {}
+            table_data.append([pdf_cell(index, header_style)] + [
+                pdf_cell(generic_register_display_value_by_name(config, field_name, payload))
+                for field_name in leaf_names
+            ])
+        if len(table_data) == 2:
+            for nihil_row in nihil_table_rows_values(len(table_data[0])):
+                table_data.append([pdf_cell(value, header_style if value else cell_style) for value in nihil_row])
+    else:
+        visible_fields = generic_register_visible_fields(config)
+        table_data = [[pdf_cell("No", header_style)] + [pdf_cell(field["label"], header_style) for field in visible_fields]]
+        for index, entry in enumerate(entries, 1):
+            try:
+                payload = json.loads(entry.get("payload") or "{}")
+            except json.JSONDecodeError:
+                payload = {}
+            table_data.append([pdf_cell(index, header_style)] + [pdf_cell(generic_register_display_value(field, payload)) for field in visible_fields])
+        if len(table_data) == 1:
+            for nihil_row in nihil_table_rows_values(len(table_data[0])):
+                table_data.append([pdf_cell(value, header_style if value else cell_style) for value in nihil_row])
+    usable_width = page_width - document.leftMargin - document.rightMargin
+    first_width = 0.8 * cm
+    data_col_count = len(table_data[0]) - 1
+    other_width = (usable_width - first_width) / max(1, data_col_count)
+    table = LongTable(table_data, repeatRows=2 if config["code"] == "R.IN.10" else 1, colWidths=[first_width] + [other_width] * data_col_count, hAlign="LEFT", splitByRow=True)
+    table_style_commands = [
+        ("GRID", (0, 0), (-1, -1), 0.5, "#000000"),
+        ("BACKGROUND", (0, 0), (-1, 1 if config["code"] == "R.IN.10" else 0), "#E8EDF3"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("VALIGN", (0, 0), (-1, 1 if config["code"] == "R.IN.10" else 0), "MIDDLE"),
+        ("ALIGN", (0, 0), (-1, 1 if config["code"] == "R.IN.10" else 0), "CENTER"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2.5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2.5),
+        ("TOPPADDING", (0, 0), (-1, -1), 3.2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3.2),
+    ]
+    if config["code"] == "R.IN.10":
+        table_style_commands.append(("SPAN", (0, 0), (0, 1)))
+        current_col = 1
+        for item in rin10_grouped_headers():
+            if item.get("children"):
+                span_to = current_col + len(item["children"]) - 1
+                table_style_commands.append(("SPAN", (current_col, 0), (span_to, 0)))
+                current_col = span_to + 1
+            else:
+                table_style_commands.append(("SPAN", (current_col, 0), (current_col, 1)))
+                current_col += 1
+    table.setStyle(TableStyle(table_style_commands))
+    def draw_register_header(pdf_canvas, _document):
+        pdf_canvas.saveState()
+        header_x = _document.leftMargin
+        header_width = page_width - _document.leftMargin - _document.rightMargin
+        pdf_canvas.setFillColorRGB(0, 0, 0)
+        title_paragraph = Paragraph(escape(title_text), title_canvas_style)
+        title_top_y = page_height - 1.45 * cm
+        title_height = title_paragraph.wrap(header_width, 2.05 * cm)[1]
+        title_bottom_y = title_top_y - title_height
+        title_paragraph.drawOn(pdf_canvas, header_x, title_bottom_y)
+        pdf_canvas.setFont(PDF_FONT_BOLD, 12)
+        pdf_canvas.drawString(header_x, title_bottom_y - 0.42 * cm, f"Bulan : {period_text}")
+        pdf_canvas.restoreState()
+
+    def signature_flowables(signer, prefix_text, date_text=None, include_stamp=False):
+        scan_path = safe_upload_path(SIGNATORY_UPLOAD_DIR, signer.get("signature_image")) if use_scan_signature else None
+        stamp_path = safe_upload_path(ORGANIZATION_UPLOAD_DIR, organization.get("digital_stamp")) if include_stamp else None
+        lines = []
+        if date_text:
+            lines.append(Paragraph(escape(date_text), signature_style))
+        if prefix_text:
+            lines.append(Paragraph(prefix_text, signature_style))
+        lines.extend([
+            Paragraph(escape(str(signer.get("position_name") or "-")), signature_style),
+            signature_image_block(scan_path, stamp_path),
+            Paragraph(f"<u>{escape(str(signer.get('full_name') or '-'))}</u>", signature_name_style),
+            Paragraph(escape(str(signer.get("rank_nip") or "-")), signature_style),
+        ])
+        return lines
+
+    report_total = len(entries)
+    recap_block = [
+        Paragraph("Rekapitulasi", recap_title_style),
+        Paragraph("Sisa bulan Lalu :", recap_style),
+        Paragraph(f"Masuk Bulan laporan : {report_total}", recap_style),
+        Paragraph(f"Jumlah : {report_total}", recap_style),
+        Paragraph("Diselesaikan :", recap_style),
+        Paragraph("Sisa Bulan Laporan :", recap_style),
+    ]
+    signature_table = Table(
+        [[
+            signature_flowables(kajari, "Mengetahui", include_stamp=use_digital_stamp),
+            recap_block,
+            signature_flowables(kasi, "", date_text=f"Singaraja, {format_indonesian_date(signature_date)}"),
+        ]],
+        colWidths=[10.2 * cm, 5.0 * cm, 10.2 * cm],
+        hAlign="CENTER",
+    )
+    signature_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    document.build([table, Spacer(1, 0.7 * cm), KeepTogether(signature_table)], onFirstPage=draw_register_header, onLaterPages=draw_register_header)
+    output.seek(0)
+    return send_file(output, as_attachment=True, download_name=f"{config['code'].replace('.', '')}-{date.today().strftime('%Y%m%d')}.pdf", mimetype="application/pdf")
+
+
+def register_intelijen_rin1_form_data():
+    form = request.form
+    today = date.today().isoformat()
+    return {
+        "received_date": (form.get("received_date") or today).strip(),
+        "received_time": (form.get("received_time") or "").strip(),
+        "incoming_letter_number": (form.get("incoming_letter_number") or "").strip(),
+        "incoming_letter_date": (form.get("incoming_letter_date") or today).strip(),
+        "sender_name": (form.get("sender_name") or "").strip(),
+        "subject": (form.get("subject") or "").strip(),
+        "disposition_date": (form.get("disposition_date") or today).strip(),
+        "disposition_content": (form.get("disposition_content") or "").strip(),
+        "follow_up": (form.get("follow_up") or "").strip(),
+        "remarks": (form.get("remarks") or "Arsip").strip() or "Arsip",
+    }
+
+
+@app.route("/register-intelijen/rin1")
+@login_required
+def register_intelijen_rin1():
+    params = []
+    conditions = []
+    search = request.args.get("q", "").strip()[:150]
+    sender = request.args.get("sender", "").strip()[:150]
+    month = request.args.get("month", "").strip()
+    year = request.args.get("year", "").strip()
+    chart_month = request.args.get("chart_month", "all").strip() or "all"
+    try:
+        page = max(1, int(request.args.get("page", "1")))
+    except ValueError:
+        page = 1
+    per_page = 10
+    if search:
+        search_value = f"%{search}%"
+        conditions.append(
+            """(entries.incoming_letter_number LIKE %s OR entries.sender_name LIKE %s
+                OR entries.subject LIKE %s OR entries.disposition_content LIKE %s
+                OR entries.follow_up LIKE %s OR entries.remarks LIKE %s
+                OR users.full_name LIKE %s)"""
+        )
+        params.extend([search_value] * 7)
+    if sender:
+        conditions.append("entries.sender_name LIKE %s")
+        params.append(f"%{sender}%")
+    if month.isdigit() and 1 <= int(month) <= 12:
+        conditions.append("MONTH(entries.received_date)=%s")
+        params.append(int(month))
+    if year.isdigit():
+        conditions.append("YEAR(entries.received_date)=%s")
+        params.append(int(year))
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    current_year = date.today().year
+    current_month = date.today().month
+    chart_conditions = ["YEAR(received_date)=%s"]
+    chart_params = [current_year]
+    if chart_month.isdigit() and 1 <= int(chart_month) <= 12:
+        chart_conditions.append("MONTH(received_date)=%s")
+        chart_params.append(int(chart_month))
+        chart_month_name = MONTH_NAMES_ID[int(chart_month)]
+    else:
+        chart_month = "all"
+        chart_month_name = "Semua bulan"
+    sender_chart_rows = fetch_all(
+        f"""SELECT COALESCE(NULLIF(TRIM(sender_name), ''), 'Tanpa Asal Surat') AS sender_label,
+                   COUNT(*) AS total
+            FROM register_intelijen_rin1_entries
+            WHERE {' AND '.join(chart_conditions)}
+            GROUP BY sender_label
+            ORDER BY total DESC, sender_label ASC
+            LIMIT 12""",
+        tuple(chart_params),
+    )
+    max_sender_total = max([int(row["total"] or 0) for row in sender_chart_rows] or [0])
+    total_current_year = int(fetch_one(
+        "SELECT COUNT(*) AS total FROM register_intelijen_rin1_entries WHERE YEAR(received_date)=%s",
+        (current_year,),
+    )["total"] or 0)
+    total_current_month = int(fetch_one(
+        """SELECT COUNT(*) AS total FROM register_intelijen_rin1_entries
+           WHERE YEAR(received_date)=%s AND MONTH(received_date)=%s""",
+        (current_year, current_month),
+    )["total"] or 0)
+    filtered_total = int(fetch_one(
+        f"""SELECT COUNT(*) AS total
+            FROM register_intelijen_rin1_entries entries
+            JOIN users ON users.id=entries.created_by
+            {where_clause}""",
+        tuple(params),
+    )["total"] or 0)
+    total_pages = max(1, (filtered_total + per_page - 1) // per_page)
+    page = min(page, total_pages)
+    rows = fetch_all(
+        f"""SELECT entries.*, users.full_name AS creator_full_name
+            FROM register_intelijen_rin1_entries entries
+            JOIN users ON users.id=entries.created_by
+            {where_clause}
+            ORDER BY entries.received_date DESC, entries.received_time DESC, entries.id DESC
+            LIMIT %s OFFSET %s""",
+        tuple(params + [per_page, (page - 1) * per_page]),
+    )
+    for row in rows:
+        row["received_time_text"] = format_time_value(row.get("received_time"))
+    total = fetch_one("SELECT COUNT(*) AS total FROM register_intelijen_rin1_entries")["total"]
+    years = fetch_all(
+        """SELECT DISTINCT YEAR(received_date) AS report_year
+           FROM register_intelijen_rin1_entries
+           WHERE received_date IS NOT NULL
+           ORDER BY report_year DESC"""
+    )
+    organization_name = (fetch_one("SELECT organization_name FROM organization_settings WHERE id=1") or {}).get("organization_name") or "Kejaksaan Negeri Buleleng"
+    return render_template(
+        "register_intelijen_rin1_list.html",
+        active="register_intelijen_rin1",
+        entries=rows,
+        total_entries=int(total or 0),
+        filtered_total=filtered_total,
+        search=search,
+        filter_sender=sender,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+        filter_month=month,
+        filter_year=year,
+        month_names=MONTH_NAMES_ID,
+        organization_name=organization_name,
+        current_year=current_year,
+        current_month=current_month,
+        current_month_name=MONTH_NAMES_ID[current_month],
+        chart_month=chart_month,
+        chart_month_name=chart_month_name,
+        sender_chart_rows=sender_chart_rows,
+        max_sender_total=max_sender_total,
+        total_current_year=total_current_year,
+        total_current_month=total_current_month,
+        today=date.today().isoformat(),
+        years=sorted(
+            {int(row["report_year"]) for row in years if row["report_year"]} | {date.today().year},
+            reverse=True,
+        ),
+    )
+
+
+@app.route("/register-intelijen/rin1/create", methods=["GET", "POST"])
+@login_required
+def create_register_intelijen_rin1():
+    if request.method == "POST":
+        data = register_intelijen_rin1_form_data()
+        if not data["incoming_letter_number"] or not data["sender_name"] or not data["subject"]:
+            flash("Nomor surat, asal surat, dan perihal wajib diisi.", "error")
+        else:
+            with get_db().cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO register_intelijen_rin1_entries
+                       (register_code, received_date, received_time, incoming_letter_number,
+                        incoming_letter_date, sender_name, subject, disposition_date,
+                        disposition_content, follow_up, remarks, created_by)
+                       VALUES ('R.IN.1', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    (
+                        data["received_date"], data["received_time"] or None,
+                        data["incoming_letter_number"], data["incoming_letter_date"],
+                        data["sender_name"], data["subject"], data["disposition_date"] or None,
+                        data["disposition_content"], data["follow_up"], data["remarks"],
+                        session["user_id"],
+                    ),
+                )
+            flash("Data R.IN.1 berhasil disimpan.", "success")
+            return redirect(url_for("register_intelijen_rin1"))
+    else:
+        data = {
+            "received_date": date.today().isoformat(),
+            "received_time": "",
+            "incoming_letter_number": "",
+            "incoming_letter_date": date.today().isoformat(),
+            "sender_name": "",
+            "subject": "",
+            "disposition_date": date.today().isoformat(),
+            "disposition_content": "",
+            "follow_up": "",
+            "remarks": "Arsip",
+        }
+    return render_template(
+        "register_intelijen_rin1_form.html",
+        active="register_intelijen_rin1",
+        form_title="Buat Register Surat Masuk R.IN.1",
+        form_description="Input data surat masuk intelijen beserta disposisi dan tindak lanjut.",
+        data=data,
+        entry=None,
+    )
+
+
+@app.route("/register-intelijen/rin1/<int:entry_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_register_intelijen_rin1(entry_id):
+    entry = fetch_one("SELECT * FROM register_intelijen_rin1_entries WHERE id=%s", (entry_id,))
+    if not entry:
+        flash("Data R.IN.1 tidak ditemukan.", "error")
+        return redirect(url_for("register_intelijen_rin1"))
+    if session.get("role") != "admin" and entry["created_by"] != session["user_id"]:
+        flash("Anda tidak dapat mengubah data R.IN.1 ini.", "error")
+        return redirect(url_for("register_intelijen_rin1"))
+    if request.method == "POST":
+        data = register_intelijen_rin1_form_data()
+        if not data["incoming_letter_number"] or not data["sender_name"] or not data["subject"]:
+            flash("Nomor surat, asal surat, dan perihal wajib diisi.", "error")
+        else:
+            with get_db().cursor() as cursor:
+                cursor.execute(
+                    """UPDATE register_intelijen_rin1_entries
+                       SET received_date=%s, received_time=%s, incoming_letter_number=%s,
+                           incoming_letter_date=%s, sender_name=%s, subject=%s,
+                           disposition_date=%s, disposition_content=%s, follow_up=%s, remarks=%s
+                       WHERE id=%s""",
+                    (
+                        data["received_date"], data["received_time"] or None,
+                        data["incoming_letter_number"], data["incoming_letter_date"],
+                        data["sender_name"], data["subject"], data["disposition_date"] or None,
+                        data["disposition_content"], data["follow_up"], data["remarks"], entry_id,
+                    ),
+                )
+            flash("Data R.IN.1 berhasil diperbarui.", "success")
+            return redirect(url_for("register_intelijen_rin1"))
+    else:
+        data = {
+            "received_date": entry["received_date"].isoformat() if entry.get("received_date") else date.today().isoformat(),
+            "received_time": format_time_value(entry.get("received_time")).replace(".", ":") if entry.get("received_time") else "",
+            "incoming_letter_number": entry.get("incoming_letter_number") or "",
+            "incoming_letter_date": entry["incoming_letter_date"].isoformat() if entry.get("incoming_letter_date") else date.today().isoformat(),
+            "sender_name": entry.get("sender_name") or "",
+            "subject": entry.get("subject") or "",
+            "disposition_date": entry["disposition_date"].isoformat() if entry.get("disposition_date") else date.today().isoformat(),
+            "disposition_content": entry.get("disposition_content") or "",
+            "follow_up": entry.get("follow_up") or "",
+            "remarks": entry.get("remarks") or "Arsip",
+        }
+    return render_template(
+        "register_intelijen_rin1_form.html",
+        active="register_intelijen_rin1",
+        form_title="Edit Register Surat Masuk R.IN.1",
+        form_description="Perbarui data surat masuk intelijen.",
+        data=data,
+        entry=entry,
+    )
+
+
+@app.post("/register-intelijen/rin1/<int:entry_id>/delete")
+@login_required
+def delete_register_intelijen_rin1(entry_id):
+    entry = fetch_one("SELECT id,created_by FROM register_intelijen_rin1_entries WHERE id=%s", (entry_id,))
+    if not entry:
+        flash("Data R.IN.1 tidak ditemukan.", "error")
+    elif session.get("role") != "admin" and entry["created_by"] != session["user_id"]:
+        flash("Anda tidak dapat menghapus data R.IN.1 ini.", "error")
+    else:
+        with get_db().cursor() as cursor:
+            cursor.execute("DELETE FROM register_intelijen_rin1_entries WHERE id=%s", (entry_id,))
+        flash("Data R.IN.1 berhasil dihapus.", "success")
+    return redirect(url_for("register_intelijen_rin1"))
+
+
+def register_rin1_filter_params():
+    params = []
+    conditions = []
+    search = request.args.get("q", "").strip()[:150]
+    sender = request.args.get("sender", "").strip()[:150]
+    month = request.args.get("month", "").strip()
+    year = request.args.get("year", "").strip()
+    if search:
+        search_value = f"%{search}%"
+        conditions.append(
+            """(entries.incoming_letter_number LIKE %s OR entries.sender_name LIKE %s
+                OR entries.subject LIKE %s OR entries.disposition_content LIKE %s
+                OR entries.follow_up LIKE %s OR entries.remarks LIKE %s
+                OR users.full_name LIKE %s)"""
+        )
+        params.extend([search_value] * 7)
+    if sender:
+        conditions.append("entries.sender_name LIKE %s")
+        params.append(f"%{sender}%")
+    if month.isdigit() and 1 <= int(month) <= 12:
+        conditions.append("MONTH(entries.received_date)=%s")
+        params.append(int(month))
+    if year.isdigit():
+        conditions.append("YEAR(entries.received_date)=%s")
+        params.append(int(year))
+    return f"WHERE {' AND '.join(conditions)}" if conditions else "", tuple(params)
+
+
+@app.get("/register-intelijen/rin1/export-excel")
+@login_required
+def export_register_intelijen_rin1_excel():
+    where_clause, params = register_rin1_filter_params()
+    entries = fetch_all(
+        f"""SELECT entries.*, users.full_name AS creator_full_name
+            FROM register_intelijen_rin1_entries entries
+            JOIN users ON users.id=entries.created_by
+            {where_clause}
+            ORDER BY entries.received_date ASC, entries.received_time ASC, entries.id ASC""",
+        params,
+    )
+    headers = [
+        "No", "Tanggal Penerimaan", "Jam Penerimaan", "Nomor Surat Masuk",
+        "Tanggal Surat Masuk", "Asal Surat", "Perihal", "Tanggal Disposisi",
+        "Isi Disposisi", "Tindak Lanjut", "Ket",
+    ]
+    rows = []
+    for index, entry in enumerate(entries, 1):
+        rows.append([
+            index,
+            entry["received_date"].strftime("%d/%m/%Y") if entry.get("received_date") else "",
+            f"{format_time_value(entry.get('received_time'))} Wita" if entry.get("received_time") else "",
+            entry.get("incoming_letter_number") or "",
+            entry["incoming_letter_date"].strftime("%d/%m/%Y") if entry.get("incoming_letter_date") else "",
+            entry.get("sender_name") or "",
+            entry.get("subject") or "",
+            entry["disposition_date"].strftime("%d/%m/%Y") if entry.get("disposition_date") else "",
+            entry.get("disposition_content") or "",
+            entry.get("follow_up") or "",
+            entry.get("remarks") or "",
+        ])
+    workbook = make_xlsx(
+        headers,
+        rows,
+        "R.IN.1",
+        title="R.IN.1 REGISTER SURAT MASUK",
+        period_text=register_export_period_text(),
+    )
+    return send_file(
+        workbook,
+        as_attachment=True,
+        download_name=f"RIN1-SURAT-MASUK-{date.today().strftime('%Y%m%d')}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.get("/register-intelijen/rin1/export-pdf")
+@login_required
+def export_register_intelijen_rin1_pdf():
+    where_clause, params = register_rin1_filter_params()
+    entries = fetch_all(
+        f"""SELECT entries.*, users.full_name AS creator_full_name
+            FROM register_intelijen_rin1_entries entries
+            JOIN users ON users.id=entries.created_by
+            {where_clause}
+            ORDER BY entries.received_date ASC, entries.received_time ASC, entries.id ASC""",
+        params,
+    )
+    month = request.args.get("month", "").strip()
+    year = request.args.get("year", "").strip()
+    use_scan_signature = request.args.get("use_scan_signature") == "1"
+    use_digital_stamp = request.args.get("use_digital_stamp") == "1"
+    use_acting_kajari = request.args.get("use_acting_kajari") == "1"
+    use_acting_kasi = request.args.get("use_acting_kasi") == "1"
+    signature_date_raw = request.args.get("signature_date", "").strip()
+    try:
+        signature_date = datetime.strptime(signature_date_raw, "%Y-%m-%d").date() if signature_date_raw else date.today()
+    except ValueError:
+        signature_date = date.today()
+    if month.isdigit() and year.isdigit() and 1 <= int(month) <= 12:
+        period_text = f"{MONTH_NAMES_ID[int(month)]} {year}"
+    elif entries:
+        received_dates = [row.get("received_date") for row in entries if row.get("received_date")]
+        first_date, last_date = min(received_dates), max(received_dates)
+        if first_date and last_date and first_date.month == last_date.month and first_date.year == last_date.year:
+            period_text = f"{MONTH_NAMES_ID[first_date.month]} {first_date.year}"
+        elif first_date and last_date and first_date.year == last_date.year:
+            period_text = f"{MONTH_NAMES_ID[first_date.month]} - {MONTH_NAMES_ID[last_date.month]} {first_date.year}"
+        else:
+            period_text = f"{MONTH_NAMES_ID[first_date.month]} {first_date.year} - {MONTH_NAMES_ID[last_date.month]} {last_date.year}"
+    else:
+        period_text = year if year.isdigit() else "-"
+
+    organization = fetch_one("SELECT * FROM organization_settings WHERE id=1") or {}
+    kajari = fetch_one("SELECT * FROM signatories WHERE position_code='kajari'") or {}
+    kasi = fetch_one("SELECT * FROM signatories WHERE position_code='kasi_intel'") or {}
+
+    def acting_signer(base_signer, prefix, enabled):
+        if not enabled:
+            return base_signer
+        acting_type = str(request.args.get(f"{prefix}_type") or "").strip().lower()
+        acting_label = "Plt." if acting_type == "plt" else "Plh." if acting_type == "plh" else ""
+        base_position = str(base_signer.get("position_name") or "").strip()
+        signer_name = str(request.args.get(f"{prefix}_name") or base_signer.get("full_name") or "").strip()
+        signer_position_detail = str(request.args.get(f"{prefix}_position") or "").strip()
+        signer_nip = str(request.args.get(f"{prefix}_nip") or "").strip()
+        rank_nip = signer_position_detail
+        if signer_nip:
+            rank_nip = f"{rank_nip} NIP. {signer_nip}".strip()
+        result = dict(base_signer)
+        result.update(
+            full_name=signer_name or "-",
+            position_name=f"{acting_label} {base_position}".strip() if acting_label else base_position or "-",
+            rank_nip=rank_nip or "-",
+            signature_image=None,
+        )
+        return result
+
+    kajari = acting_signer(kajari, "acting_kajari", use_acting_kajari)
+    kasi = acting_signer(kasi, "acting_kasi", use_acting_kasi)
+
+    def safe_upload_path(base_dir, filename):
+        if not filename:
+            return None
+        path = (base_dir / filename).resolve()
+        try:
+            path.relative_to(base_dir.resolve())
+        except ValueError:
+            return None
+        return path if path.is_file() else None
+
+    def pdf_image(path, max_width, max_height):
+        if not path:
+            return Spacer(1, max_height)
+        try:
+            with PILImage.open(path) as image:
+                width, height = image.size
+        except Exception:
+            return Spacer(1, max_height)
+        if not width or not height:
+            return Spacer(1, max_height)
+        ratio = min(max_width / width, max_height / height)
+        return Image(str(path), width=width * ratio, height=height * ratio)
+
+    def signature_image_block(scan_path, stamp_path=None):
+        flowables = []
+        if stamp_path:
+            flowables.append(pdf_image(stamp_path, 2.35 * cm, 2.35 * cm))
+        if scan_path:
+            flowables.append(pdf_image(scan_path, 6.25 * cm, 2.75 * cm))
+        if not flowables:
+            flowables = [Spacer(1, 2.75 * cm)]
+        image_block = Table([flowables], colWidths=([2.65 * cm] if stamp_path else []) + ([6.9 * cm] if scan_path else [6.9 * cm]), hAlign="CENTER")
+        image_block.setStyle(TableStyle([
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        return image_block
+
+    output = BytesIO()
+    page_size = landscape((8.5 * inch, 13 * inch))
+    page_width, page_height = page_size
+    document = SimpleDocTemplate(
+        output,
+        pagesize=page_size,
+        rightMargin=1 * cm,
+        leftMargin=1 * cm,
+        topMargin=3 * cm,
+        bottomMargin=1.1 * cm,
+        allowSplitting=True,
+    )
+    styles = getSampleStyleSheet()
+    cell_style = ParagraphStyle("Rin1Cell", parent=styles["Normal"], fontName=PDF_FONT_NAME, fontSize=8, leading=9.4, spaceBefore=0, spaceAfter=0, splitLongWords=True)
+    center_style = ParagraphStyle("Rin1CellCenter", parent=cell_style, alignment=TA_CENTER)
+    header_style = ParagraphStyle("Rin1Header", parent=cell_style, fontName=PDF_FONT_BOLD, alignment=TA_CENTER, leading=9.6)
+    signature_style = ParagraphStyle("Rin1Signature", parent=styles["Normal"], fontName=PDF_FONT_NAME, fontSize=10, leading=12, alignment=TA_CENTER, spaceBefore=0, spaceAfter=0)
+    signature_name_style = ParagraphStyle("Rin1SignatureName", parent=signature_style, fontName=PDF_FONT_BOLD)
+    recap_title_style = ParagraphStyle("Rin1RecapTitle", parent=signature_style, fontName=PDF_FONT_BOLD, alignment=TA_LEFT)
+    recap_style = ParagraphStyle("Rin1Recap", parent=signature_style, alignment=TA_LEFT)
+
+    def rin1_cell(value, style=cell_style):
+        return Paragraph(escape(str(value if value is not None else "-")).replace("\n", "<br/>"), style)
+
+    data = [
+        [
+            rin1_cell("No", header_style),
+            rin1_cell("WAKTU PENERIMAAN SURAT", header_style), "",
+            rin1_cell("SURAT MASUK", header_style), "",
+            rin1_cell("ASAL SURAT", header_style),
+            rin1_cell("PERIHAL", header_style),
+            rin1_cell("DISPOSISI", header_style), "", "",
+            rin1_cell("KETERANGAN", header_style),
+        ],
+        [
+            "",
+            rin1_cell("Tanggal", header_style),
+            rin1_cell("Jam", header_style),
+            rin1_cell("Nomor", header_style),
+            rin1_cell("Tanggal", header_style),
+            "",
+            "",
+            rin1_cell("Tanggal", header_style),
+            rin1_cell("Isi", header_style),
+            rin1_cell("Tindak Lanjut", header_style),
+            "",
+        ],
+    ]
+    for index, entry in enumerate(entries, 1):
+        data.append([
+            rin1_cell(index, center_style),
+            rin1_cell(entry["received_date"].strftime("%d/%m/%Y") if entry.get("received_date") else "-", center_style),
+            rin1_cell(f"{format_time_value(entry.get('received_time'))} Wita" if entry.get("received_time") else "-", center_style),
+            rin1_cell(entry.get("incoming_letter_number") or "-"),
+            rin1_cell(entry["incoming_letter_date"].strftime("%d/%m/%Y") if entry.get("incoming_letter_date") else "-", center_style),
+            rin1_cell(entry.get("sender_name") or "-"),
+            rin1_cell(entry.get("subject") or "-"),
+            rin1_cell(entry["disposition_date"].strftime("%d/%m/%Y") if entry.get("disposition_date") else "-", center_style),
+            rin1_cell(entry.get("disposition_content") or "-"),
+            rin1_cell(entry.get("follow_up") or "-"),
+            rin1_cell(entry.get("remarks") or "-", center_style),
+        ])
+    if len(data) == 2:
+        for nihil_row in nihil_table_rows_values(11):
+            data.append([rin1_cell(value, header_style if value else cell_style) for value in nihil_row])
+    base_widths = [0.7*cm, 1.55*cm, 1.45*cm, 3.15*cm, 1.55*cm, 3.0*cm, 3.55*cm, 1.55*cm, 2.35*cm, 3.7*cm, 1.35*cm]
+    usable_width = page_width - document.leftMargin - document.rightMargin
+    width_scale = usable_width / sum(base_widths)
+    table = LongTable(
+        data,
+        repeatRows=2,
+        colWidths=[item * width_scale for item in base_widths],
+        hAlign="LEFT",
+        splitByRow=True,
+        splitInRow=False,
+    )
+    table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, "#000000"),
+        ("SPAN", (0, 0), (0, 1)),
+        ("SPAN", (1, 0), (2, 0)),
+        ("SPAN", (3, 0), (4, 0)),
+        ("SPAN", (5, 0), (5, 1)),
+        ("SPAN", (6, 0), (6, 1)),
+        ("SPAN", (7, 0), (9, 0)),
+        ("SPAN", (10, 0), (10, 1)),
+        ("BACKGROUND", (0, 0), (-1, 1), "#E8EDF3"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("VALIGN", (0, 0), (-1, 1), "MIDDLE"),
+        ("ALIGN", (0, 0), (-1, 1), "CENTER"),
+        ("ALIGN", (0, 2), (2, -1), "CENTER"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2.5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2.5),
+        ("TOPPADDING", (0, 0), (-1, -1), 3.2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3.2),
+    ]))
+
+    def signature_flowables(signer, prefix_text, date_text=None, include_stamp=False):
+        scan_path = safe_upload_path(SIGNATORY_UPLOAD_DIR, signer.get("signature_image")) if use_scan_signature else None
+        stamp_path = safe_upload_path(ORGANIZATION_UPLOAD_DIR, organization.get("digital_stamp")) if include_stamp else None
+        lines = []
+        if date_text:
+            lines.append(Paragraph(escape(date_text), signature_style))
+        if prefix_text:
+            lines.append(Paragraph(prefix_text, signature_style))
+        lines.extend([
+            Paragraph(escape(str(signer.get("position_name") or "-")), signature_style),
+            signature_image_block(scan_path, stamp_path),
+            Paragraph(f"<u>{escape(str(signer.get('full_name') or '-'))}</u>", signature_name_style),
+            Paragraph(escape(str(signer.get("rank_nip") or "-")), signature_style),
+        ])
+        return lines
+
+    report_total = len(entries)
+    recap_block = [
+        Paragraph("Rekapitulasi", recap_title_style),
+        Paragraph("Sisa bulan Lalu :", recap_style),
+        Paragraph(f"Masuk Bulan laporan : {report_total}", recap_style),
+        Paragraph(f"Jumlah : {report_total}", recap_style),
+        Paragraph("Diselesaikan :", recap_style),
+        Paragraph("Sisa Bulan Laporan :", recap_style),
+    ]
+    signature_table = Table(
+        [[
+            signature_flowables(kajari, "Mengetahui", include_stamp=use_digital_stamp),
+            recap_block,
+            signature_flowables(kasi, "", date_text=f"Singaraja, {format_indonesian_date(signature_date)}"),
+        ]],
+        colWidths=[10.2 * cm, 5.0 * cm, 10.2 * cm],
+        hAlign="CENTER",
+    )
+    signature_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+
+    def draw_register_header(pdf_canvas, _document):
+        pdf_canvas.saveState()
+        header_x = _document.leftMargin
+        pdf_canvas.setFillColorRGB(0, 0, 0)
+        pdf_canvas.setFont(PDF_FONT_BOLD, 12)
+        pdf_canvas.drawString(header_x, page_height - 2.05 * cm, "R.IN.1 REGISTER SURAT MASUK")
+        pdf_canvas.drawString(header_x, page_height - 2.48 * cm, f"Bulan : {period_text}")
+        pdf_canvas.restoreState()
+
+    story = [table, Spacer(1, 0.7 * cm), KeepTogether(signature_table)]
+    document.build(story, onFirstPage=draw_register_header, onLaterPages=draw_register_header)
+    output.seek(0)
+    return send_file(output, as_attachment=True, download_name=f"RIN1-SURAT-MASUK-{date.today().strftime('%Y%m%d')}.pdf", mimetype="application/pdf")
 
 
 def register_intelijen_form_data():
@@ -1024,7 +2716,13 @@ def export_register_intelijen_rin5_excel():
             entry.get("leader_disposition") or "",
             entry.get("remarks") or "",
         ])
-    workbook = make_xlsx(headers, rows, "R.IN.5")
+    workbook = make_xlsx(
+        headers,
+        rows,
+        "R.IN.5",
+        title="R.IN.5 REGISTER PRODUK INTELIJEN",
+        period_text=register_export_period_text(),
+    )
     filename = f"RIN5-REGISTER-PRODUK-INTELIJEN-{date.today().strftime('%Y%m%d')}.xlsx"
     return send_file(
         workbook,
@@ -1098,7 +2796,13 @@ def export_register_intelijen_excel():
             entry.get("follow_up") or "",
             entry.get("remarks") or "",
         ])
-    workbook = make_xlsx(headers, rows, "R.IN.3")
+    workbook = make_xlsx(
+        headers,
+        rows,
+        "R.IN.3",
+        title="R.IN.3 REGISTER KERJA INTELIJEN",
+        period_text=register_export_period_text(),
+    )
     filename = f"RIN3-REGISTER-KERJA-INTELIJEN-{date.today().strftime('%Y%m%d')}.xlsx"
     return send_file(
         workbook,
@@ -1358,7 +3062,8 @@ def export_register_intelijen_rin5_pdf():
             rin5_cell(entry.get("remarks"), center_style),
         ])
     if len(table_data) == 1:
-        table_data.append([rin5_cell("-") for _ in range(9)])
+        for nihil_row in nihil_table_rows_values(9):
+            table_data.append([rin5_cell(value, header_style if value else cell_style) for value in nihil_row])
     table = LongTable(
         table_data,
         colWidths=[0.8 * cm, 2.7 * cm, 3.1 * cm, 3.1 * cm, 2.0 * cm, 4.0 * cm, 6.6 * cm, 6.0 * cm, 2.5 * cm],
@@ -1985,6 +3690,9 @@ def export_register_intelijen_pdf():
                 cell_paragraph(row.get("remarks"), center_style),
             ]
         )
+    if len(table_data) == 1:
+        for nihil_row in nihil_table_rows_values(len(headers)):
+            table_data.append([cell_paragraph(value, header_style if value else cell_style) for value in nihil_row])
 
     column_widths = [
         0.8 * cm,
@@ -2672,6 +4380,10 @@ def lapinhar_form_data():
     data["letter_use_digital_stamp"] = (
         1 if request.form.get("letter_use_digital_stamp") == "1" else 0
     )
+    data["sipede_manual"] = request.form.get("sipede_manual") == "1"
+    data["sipede_number"] = request.form.get("sipede_number", "").strip()
+    if not data["sipede_manual"] and not data["sipede_number"]:
+        data["sipede_number"] = "-"
     acting_officer_type = request.form.get("acting_officer_type", "").strip().lower()
     data["acting_officer_type"] = (
         acting_officer_type if acting_officer_type in {"plh", "plt"} else None
@@ -3860,6 +5572,8 @@ def edit_lapinsus(report_id):
                 data["report_acting_name"], data["report_acting_position"],
                 data["report_acting_nip"]))):
             flash("Jenis, nama, jabatan, dan NIP PLT/PLH penandatangan wajib diisi.", "error")
+        elif data["sipede_manual"] and not data["sipede_number"]:
+            flash("Nomor Sipede manual wajib diisi.", "error")
         elif not all((data["report_number"], data["subject"], data["information"], data["category_id"], data["issue_code"])):
             flash("Nomor permasalahan, kategori, perihal, dan informasi wajib diisi.", "error")
         elif not available:
@@ -3877,6 +5591,7 @@ def edit_lapinsus(report_id):
                     letter_use_digital_stamp=%s,
                     acting_officer_type=%s,acting_officer_name=%s,
                     acting_officer_position=%s,acting_officer_rank=%s,acting_officer_nip=%s,
+                    sipede_number=%s,sipede_status=%s,
                     information_spacing='1.5',sources_spacing='1.5',trends_spacing='1.5',suggestions_spacing='1.5',
                     status='selesai'
                     WHERE id=%s""",
@@ -3891,7 +5606,10 @@ def edit_lapinsus(report_id):
                      data["report_acting_nip"], data["letter_use_digital_stamp"],
                      data["acting_officer_type"], data["acting_officer_name"],
                      data["acting_officer_position"], data["acting_officer_rank"],
-                     data["acting_officer_nip"], report_id),
+                     data["acting_officer_nip"],
+                     data["sipede_number"] if data["sipede_manual"] else (report["sipede_number"] or None),
+                     "manual" if data["sipede_manual"] else ("belum" if report["sipede_status"] == "manual" else report["sipede_status"]),
+                     report_id),
                 )
                 reservation_token = request.form.get("number_reservation_token", "")
                 if reservation_token:
@@ -3915,6 +5633,8 @@ def edit_lapinsus(report_id):
                 remove_attachment_files(old_files, report_id)
             flash("LAPINSUS berhasil diperbarui.", "success")
             after_save = request.form.get("after_save", "")
+            if after_save == "sipede" and data["sipede_manual"]:
+                after_save = ""
             if after_save in {"docx", "print", "pdf", "sipede"}:
                 return redirect(url_for("edit_lapinsus", report_id=report_id, after_save=after_save))
             return redirect(url_for("lapinsus"))
@@ -3965,6 +5685,8 @@ def upload_lapinsus_sipede(report_id):
         return jsonify(message="Konfigurasi Sipede belum tersedia. Isi username dan password pada Konfigurasi Integrasi."), 409
     if report.get("sipede_status") == "sudah":
         return jsonify(message="LAPINSUS sudah diupload ke Sipede."), 200
+    if report.get("sipede_status") == "manual":
+        return jsonify(message="Nomor SIPede diinput manual. Upload ke SIPede dinonaktifkan."), 400
     if not setting.get("session_data_encrypted") or not setting.get("connected_at"):
         return jsonify(message="Login SIPede diperlukan.", requires_sipede_login=True), 401
     session_data = get_sipede_session_data(session["user_id"])
@@ -4726,7 +6448,7 @@ def run_inteliz_auth(auth_id, user_id, credentials):
                 executable_path=str(CHROME_EXECUTABLE),
                 headless=os.getenv("INTELIZ_BROWSER_HEADLESS", "1") == "1",
                 slow_mo=int(os.getenv("INTELIZ_BROWSER_SLOW_MO", "0")),
-                args=["--disable-blink-features=AutomationControlled"],
+                args=browser_launch_args(browser_key="INTELIZ_BROWSER"),
             )
             context = browser.new_context(viewport={"width": 1280, "height": 900}, locale="id-ID")
             page = context.new_page()
@@ -5096,16 +6818,41 @@ def run_sipede_auth(auth_id, user_id, credentials):
         if not CHROME_EXECUTABLE.exists():
             raise RuntimeError("Google Chrome tidak ditemukan pada komputer server.")
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(
-                executable_path=str(CHROME_EXECUTABLE),
-                headless=os.getenv("SIPEDE_BROWSER_HEADLESS", "1") == "1",
-                slow_mo=int(os.getenv("SIPEDE_BROWSER_SLOW_MO", "250")),
-                args=["--incognito", "--disable-blink-features=AutomationControlled"],
-            )
-            context = browser.new_context(viewport={"width": 1280, "height": 900}, locale="id-ID")
-            page = context.new_page()
+            def open_sipede_browser(use_proxy=True):
+                opened_browser = playwright.chromium.launch(
+                    executable_path=str(CHROME_EXECUTABLE),
+                    headless=os.getenv("SIPEDE_BROWSER_HEADLESS", "1") == "1",
+                    slow_mo=int(os.getenv("SIPEDE_BROWSER_SLOW_MO", "250")),
+                    args=browser_launch_args(
+                        ["--incognito"], browser_key="SIPEDE_BROWSER", use_proxy=use_proxy
+                    ),
+                )
+                opened_context = opened_browser.new_context(
+                    viewport={"width": 1280, "height": 900}, locale="id-ID"
+                )
+                return opened_browser, opened_context, opened_context.new_page()
+
+            browser, context, page = open_sipede_browser(use_proxy=True)
             update_sipede_auth(auth_id, status="loading", message="Membuka halaman SIPede…")
-            page.goto(SIPEDE_LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
+            try:
+                page.goto(SIPEDE_LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
+            except Exception as goto_exc:
+                goto_message = str(goto_exc)
+                if ("ERR_PROXY_CONNECTION_FAILED" not in goto_message
+                        and "ERR_NETWORK_ACCESS_DENIED" not in goto_message):
+                    raise
+                app.logger.warning("Login SIPede via proxy gagal, mencoba ulang tanpa proxy: %s", goto_exc)
+                update_sipede_auth(
+                    auth_id,
+                    status="loading",
+                    message="Proxy SIPede gagal. Mencoba ulang koneksi langsung...",
+                )
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+                browser, context, page = open_sipede_browser(use_proxy=False)
+                page.goto(SIPEDE_LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
 
             authenticated = False
             for _attempt in range(3):
@@ -5497,7 +7244,11 @@ def export_lapinhar_preview_pdf():
         return "Google Chrome tidak ditemukan. Atur CHROME_EXECUTABLE pada file .env.", 500
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(executable_path=str(CHROME_EXECUTABLE), headless=True)
+            browser = playwright.chromium.launch(
+                executable_path=str(CHROME_EXECUTABLE),
+                headless=True,
+                args=browser_launch_args(),
+            )
             page = browser.new_page(viewport={"width": 816, "height": 1248})
             page.set_content(printable_html, wait_until="networkidle")
             page.emulate_media(media="print")

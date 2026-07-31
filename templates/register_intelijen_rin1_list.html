@@ -1,23 +1,23 @@
 {% extends "app_layout.html" %}
-{% block title %}R.IN.5 - IndraOne{% endblock %}
-{% block page_title %}Register Intelijen {% endblock %}
+{% block title %}R.IN.1 - IndraOne{% endblock %}
+{% block page_title %}Register Intelijen{% endblock %}
 {% block app_content %}
 <section class="page-heading">
-  <div><p class="section-kicker">MODUL REGISTER</p><h1>Register Produk Intelijen R.IN.5</h1><p>Kelola daftar produk intelijen, nomor, tanggal, bidang, perihal, disposisi, dan keterangan.</p></div>
+  <div><p class="section-kicker">MODUL REGISTER</p><h1>Register Surat Masuk R.IN.1</h1><p>Kelola register surat masuk, asal surat, disposisi, tindak lanjut, dan keterangan.</p></div>
   <div class="register-page-actions">
     <button type="button" class="register-export-button" data-register-export-open><span>PDF</span><strong>Ekspor PDF</strong></button>
     <button type="button" class="register-excel-button" data-register-export-open><span>XLS</span><strong>Ekspor Excel</strong></button>
-    <a class="primary-button" href="{{ url_for('create_register_intelijen_rin5') }}">+ Tambah Data</a>
+    <a class="primary-button" href="{{ url_for('create_register_intelijen_rin1') }}">+ Tambah Data</a>
   </div>
 </section>
 
 <section class="register-overview-grid">
   <section class="content-card register-notes-chart">
     <div class="card-heading register-chart-heading">
-      <div><h2>Grafik Register</h2><span>Total masing-masing jenis produk intelijen {{ chart_month_name }} {{ current_year }}.</span></div>
+      <div><h2>Grafik Asal Surat</h2><span>Total surat masuk berdasarkan asal surat {{ chart_month_name }} {{ current_year }}.</span></div>
       <form method="get" class="register-chart-filter">
         <input type="hidden" name="q" value="{{ search }}">
-        <input type="hidden" name="bidang" value="{{ filter_bidang }}">
+        <input type="hidden" name="sender" value="{{ filter_sender }}">
         <input type="hidden" name="month" value="{{ filter_month }}">
         <input type="hidden" name="year" value="{{ filter_year }}">
         <label>
@@ -32,14 +32,14 @@
       </form>
     </div>
     <div class="register-bar-chart">
-      {% for item in product_chart_rows %}
+      {% for item in sender_chart_rows %}
       <div class="register-bar-row">
-        <span title="{{ item.product_label }}">{{ item.product_label }}</span>
-        <div><i style="width: {{ ((item.total / max_product_total) * 100)|round(0, 'floor') if max_product_total else 0 }}%"></i></div>
+        <span title="{{ item.sender_label }}">{{ item.sender_label }}</span>
+        <div><i style="width: {{ ((item.total / max_sender_total) * 100)|round(0, 'floor') if max_sender_total else 0 }}%"></i></div>
         <strong>{{ item.total }}</strong>
       </div>
       {% else %}
-      <p class="register-chart-empty">Belum ada data jenis produk pada {{ chart_month_name }} {{ current_year }}.</p>
+      <p class="register-chart-empty">Belum ada data asal surat pada {{ chart_month_name }} {{ current_year }}.</p>
       {% endfor %}
     </div>
   </section>
@@ -47,34 +47,29 @@
     <article>
       <span>Total Register Tahun {{ current_year }}</span>
       <strong>{{ total_current_year }}</strong>
-      <small>Seluruh data R.IN.5 pada tahun {{ current_year }}</small>
+      <small>Seluruh data R.IN.1 pada tahun {{ current_year }}</small>
     </article>
-    <article class="pending-inteliz">
+    <article class="summary-inteliz">
       <span>Total Register Bulan {{ current_month_name }}</span>
       <strong>{{ total_current_month }}</strong>
-      <small>Data R.IN.5 pada bulan {{ current_month_name }} {{ current_year }}</small>
+      <small>Data R.IN.1 pada bulan {{ current_month_name }} {{ current_year }}</small>
     </article>
   </div>
 </section>
 
 <section class="content-card register-filter-card">
-  <div class="card-heading"><div><h2>Filter Data</h2><span>Cari berdasarkan jenis produk, nomor, perihal, disposisi, atau pembuat data.</span></div></div>
-  <form method="get" class="register-filter-form">
+  <div class="card-heading"><div><h2>Filter Data</h2><span>Cari berdasarkan nomor surat, asal surat, perihal, disposisi, atau pembuat data.</span></div></div>
+  <form method="get" class="register-filter-form register-rin1-filter-form">
     <label class="register-query-field">
       <span>Pencarian</span>
-      <input type="search" name="q" value="{{ search }}" placeholder="Cari jenis produk, nomor, perihal, atau disposisi...">
+      <input type="search" name="q" value="{{ search }}" placeholder="Cari nomor, asal surat, perihal, disposisi...">
     </label>
     <label>
-      <span>Subdit/Seksi/Subseksi</span>
-      <select name="bidang">
-        <option value="">Semua bidang</option>
-        {% for code, label in issue_code_labels.items() %}
-        <option value="{{ code }}" {{ 'selected' if filter_bidang == code else '' }}>{{ code }} - {{ label }}</option>
-        {% endfor %}
-      </select>
+      <span>Asal Surat</span>
+      <input type="search" name="sender" value="{{ filter_sender }}" placeholder="Filter asal surat">
     </label>
     <label>
-      <span>Bulan Produk</span>
+      <span>Bulan Terima</span>
       <select name="month">
         <option value="">Semua bulan</option>
         {% for month_no in range(1, 13) %}
@@ -93,48 +88,57 @@
     </label>
     <div class="register-filter-actions">
       <button type="submit" class="primary-button">Terapkan</button>
-      <a class="register-reset-button" href="{{ url_for('register_intelijen_rin5') }}">Reset</a>
+      <a class="register-reset-button" href="{{ url_for('register_intelijen_rin1') }}">Reset</a>
     </div>
   </form>
 </section>
 
 <section class="content-card table-card">
   <div class="card-heading register-table-heading">
-    <div><h2>Daftar R.IN.5</h2><span>{{ filtered_total }} data ditemukan</span></div>
+    <div><h2>Daftar R.IN.1</h2><span>{{ filtered_total }} data ditemukan</span></div>
   </div>
   <div class="table-wrap register-table-wrap">
-    <table class="register-table register-rin5-table">
+    <table class="register-table register-rin1-table">
       <thead>
         <tr>
-          <th>No</th>
-          <th>Nama Satker</th>
-          <th>Jenis Produk Intelijen</th>
-          <th>Nomor Produk Intelijen</th>
-          <th>Tanggal Produk Intelijen</th>
-          <th>Subdit/Seksi/Subseksi</th>
-          <th>Perihal</th>
-          <th>Disposisi Pimpinan</th>
-          <th>Keterangan</th>
-          <th>Aksi</th>
+          <th rowspan="2">No</th>
+          <th colspan="2">Waktu Penerimaan Surat</th>
+          <th colspan="2">Surat Masuk</th>
+          <th rowspan="2">Asal Surat</th>
+          <th rowspan="2">Perihal</th>
+          <th colspan="3">Disposisi</th>
+          <th rowspan="2">Keterangan</th>
+          <th rowspan="2">Aksi</th>
+        </tr>
+        <tr>
+          <th>Tanggal</th>
+          <th>Jam</th>
+          <th>Nomor</th>
+          <th>Tanggal</th>
+          <th>Tanggal</th>
+          <th>Isi</th>
+          <th>Tindak Lanjut</th>
         </tr>
       </thead>
       <tbody>
         {% for entry in entries %}
         <tr>
           <td class="register-col-no"><strong>{{ ((page - 1) * per_page) + loop.index }}</strong></td>
-          <td><div class="register-cell-main">{{ organization_name }}</div><small>Dibuat oleh {{ entry.creator_full_name }}</small></td>
-          <td><div class="register-cell-main">{{ entry.intelligence_product_type }}</div></td>
-          <td><span class="register-value-badge">{{ entry.intelligence_product_number }}</span></td>
-          <td><span class="register-date-badge">{{ entry.intelligence_product_date.strftime('%d/%m/%Y') if entry.intelligence_product_date else '-' }}</span></td>
-          <td class="register-col-field"><strong>{{ entry.field_code }}</strong><small>{{ issue_code_labels.get(entry.field_code, '-') }}</small></td>
+          <td><span class="register-date-badge">{{ entry.received_date.strftime('%d/%m/%Y') if entry.received_date else '-' }}</span></td>
+          <td class="register-col-time">{{ entry.received_time_text }} Wita</td>
+          <td><div class="register-cell-main">{{ entry.incoming_letter_number }}</div><small>Dibuat oleh {{ entry.creator_full_name }}</small></td>
+          <td><span class="register-date-badge">{{ entry.incoming_letter_date.strftime('%d/%m/%Y') if entry.incoming_letter_date else '-' }}</span></td>
+          <td><div class="register-cell-main">{{ entry.sender_name }}</div></td>
           <td><div class="register-long-text">{{ entry.subject }}</div></td>
-          <td><div class="register-long-text">{{ entry.leader_disposition or '-' }}</div></td>
+          <td><span class="register-date-badge">{{ entry.disposition_date.strftime('%d/%m/%Y') if entry.disposition_date else '-' }}</span></td>
+          <td><div class="register-long-text">{{ entry.disposition_content or '-' }}</div></td>
+          <td><div class="register-long-text">{{ entry.follow_up or '-' }}</div></td>
           <td><span class="register-remark-badge">{{ entry.remarks or '-' }}</span></td>
           <td>
             {% if session.role == 'admin' or entry.created_by == session.user_id %}
             <div class="report-actions register-actions">
-              <a href="{{ url_for('edit_register_intelijen_rin5', entry_id=entry.id) }}">Edit</a>
-              <form method="post" action="{{ url_for('delete_register_intelijen_rin5', entry_id=entry.id) }}" onsubmit="return confirm('Hapus data R.IN.5 ini?')">
+              <a href="{{ url_for('edit_register_intelijen_rin1', entry_id=entry.id) }}">Edit</a>
+              <form method="post" action="{{ url_for('delete_register_intelijen_rin1', entry_id=entry.id) }}" onsubmit="return confirm('Hapus data R.IN.1 ini?')">
                 <button type="submit">Hapus</button>
               </form>
             </div>
@@ -144,26 +148,26 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="10" class="no-search-results">Belum ada data R.IN.5.</td></tr>
+        <tr><td colspan="12" class="no-search-results">Belum ada data R.IN.1.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   {% if total_pages > 1 %}
-  <nav class="report-pagination" aria-label="Halaman daftar R.IN.5">
+  <nav class="report-pagination" aria-label="Halaman daftar R.IN.1">
     <span>Halaman {{ page }} dari {{ total_pages }}</span>
     <div>
-      {% if page > 1 %}<a href="{{ url_for('register_intelijen_rin5', q=search, bidang=filter_bidang, month=filter_month, year=filter_year, page=page-1) }}">Sebelumnya</a>{% endif %}
+      {% if page > 1 %}<a href="{{ url_for('register_intelijen_rin1', q=search, sender=filter_sender, month=filter_month, year=filter_year, page=page-1) }}">Sebelumnya</a>{% endif %}
       {% for number in range(1, total_pages + 1) %}
         {% if number == page %}
         <strong>{{ number }}</strong>
         {% elif number == 1 or number == total_pages or (number >= page-2 and number <= page+2) %}
-        <a href="{{ url_for('register_intelijen_rin5', q=search, bidang=filter_bidang, month=filter_month, year=filter_year, page=number) }}">{{ number }}</a>
+        <a href="{{ url_for('register_intelijen_rin1', q=search, sender=filter_sender, month=filter_month, year=filter_year, page=number) }}">{{ number }}</a>
         {% elif number == 2 or number == total_pages-1 %}
         <i>...</i>
         {% endif %}
       {% endfor %}
-      {% if page < total_pages %}<a href="{{ url_for('register_intelijen_rin5', q=search, bidang=filter_bidang, month=filter_month, year=filter_year, page=page+1) }}">Berikutnya</a>{% endif %}
+      {% if page < total_pages %}<a href="{{ url_for('register_intelijen_rin1', q=search, sender=filter_sender, month=filter_month, year=filter_year, page=page+1) }}">Berikutnya</a>{% endif %}
     </div>
   </nav>
   {% endif %}
@@ -171,13 +175,13 @@
 
 <div class="register-export-modal" data-register-export-modal hidden>
   <button type="button" class="register-export-backdrop" data-register-export-close aria-label="Tutup popup"></button>
-  <form class="register-export-dialog" method="get" action="{{ url_for('export_register_intelijen_rin5_pdf') }}">
+  <form class="register-export-dialog" method="get" action="{{ url_for('export_register_intelijen_rin1_pdf') }}">
     <input type="hidden" name="q" value="{{ search }}">
-    <input type="hidden" name="bidang" value="{{ filter_bidang }}">
+    <input type="hidden" name="sender" value="{{ filter_sender }}">
     <button type="button" class="register-export-close" data-register-export-close aria-label="Tutup">x</button>
     <span class="register-export-icon">PDF</span>
-    <h2>Ekspor Register R.IN.5</h2>
-    <p>Pilih bulan, tahun, dan tanda tangan untuk PDF Register Produk Intelijen.</p>
+    <h2>Ekspor Register R.IN.1</h2>
+    <p>Pilih bulan dan tahun untuk PDF Register Surat Masuk.</p>
     <div class="register-export-grid">
       <label>
         <span>Bulan</span>
@@ -238,7 +242,7 @@
     </div>
     <div class="register-export-actions">
       <button type="button" class="register-reset-button" data-register-export-close>Batal</button>
-      <button type="submit" class="register-excel-button" formaction="{{ url_for('export_register_intelijen_rin5_excel') }}"><span>XLS</span><strong>Download Excel</strong></button>
+      <button type="submit" class="register-excel-button" formaction="{{ url_for('export_register_intelijen_rin1_excel') }}"><span>XLS</span><strong>Download Excel</strong></button>
       <button type="submit" class="primary-button">Download PDF</button>
     </div>
   </form>
@@ -252,20 +256,17 @@
   const openButtons = document.querySelectorAll("[data-register-export-open]");
   const closeButtons = document.querySelectorAll("[data-register-export-close]");
   if (!modal || !openButtons.length) return;
-
   const openModal = () => {
     modal.hidden = false;
     document.body.classList.add("register-export-modal-open");
     const firstSelect = modal.querySelector("select");
     if (firstSelect) firstSelect.focus();
   };
-
   const closeModal = () => {
     modal.hidden = true;
     document.body.classList.remove("register-export-modal-open");
     openButtons[0].focus();
   };
-
   openButtons.forEach((button) => button.addEventListener("click", openModal));
   closeButtons.forEach((button) => button.addEventListener("click", closeModal));
   modal.querySelectorAll("[data-acting-export-toggle]").forEach((checkbox) => {

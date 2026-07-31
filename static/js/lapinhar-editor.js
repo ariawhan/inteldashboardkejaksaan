@@ -228,7 +228,31 @@ function updateSipedePreviewNumber(value) {
 }
 
 const sipedeNumberField = document.querySelector('input[name="sipede_number"]');
+const sipedeManualToggle = document.querySelector("[data-sipede-manual-toggle]");
+const sipedeManualHint = document.querySelector("[data-sipede-manual-hint]");
+
+function syncSipedeManualInput() {
+  if (!sipedeNumberField || !sipedeManualToggle) return;
+  const isManual = sipedeManualToggle.checked;
+  sipedeNumberField.readOnly = !isManual;
+  sipedeNumberField.closest(".sipede-number-field")?.classList.toggle("is-manual", isManual);
+  if (sipedeManualHint) {
+    sipedeManualHint.textContent = isManual
+      ? "Status SIPede akan disimpan manual. Upload ke SIPede dinonaktifkan."
+      : "Centang input manual jika nomor surat SIPede sudah dibuat di luar sistem.";
+  }
+  if (isManual && (!sipedeNumberField.value || sipedeNumberField.value === "-")) {
+    sipedeNumberField.value = "";
+  } else if (!isManual && !sipedeNumberField.value.trim()) {
+    sipedeNumberField.value = "-";
+  }
+  updateSipedePreviewNumber(sipedeNumberField.value);
+}
+
 updateSipedePreviewNumber(sipedeNumberField?.value);
+sipedeManualToggle?.addEventListener("change", syncSipedeManualInput);
+sipedeNumberField?.addEventListener("input", () => updateSipedePreviewNumber(sipedeNumberField.value));
+syncSipedeManualInput();
 document.querySelector("[data-issue-code]")?.addEventListener(
   "change", () => updateSipedePreviewNumber(sipedeNumberField?.value)
 );

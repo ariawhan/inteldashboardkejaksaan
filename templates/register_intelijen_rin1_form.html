@@ -1,0 +1,61 @@
+{% extends "app_layout.html" %}
+{% block title %}{{ form_title }} - IndraOne{% endblock %}
+{% block page_title %}{{ form_title }}{% endblock %}
+{% block app_content %}
+<section class="editor-heading">
+  <div><p class="section-kicker">REGISTER INTELIJEN</p><h1>{{ form_title }}</h1><p>{{ form_description }}</p></div>
+  <a class="back-link" href="{{ url_for('register_intelijen_rin1') }}">Kembali</a>
+</section>
+
+<form method="post" class="register-intel-form">
+  <section class="content-card register-form-card">
+    <div class="form-section-title"><span>01</span><div><strong>Data Surat Masuk R.IN.1</strong><small>Catat waktu penerimaan, surat masuk, asal surat, disposisi, dan tindak lanjut.</small></div></div>
+    <div class="form-grid">
+      <label>
+        <span>Tanggal Penerimaan Surat</span>
+        <input type="date" name="received_date" value="{{ data.received_date }}" required>
+      </label>
+      <label>
+        <span>Jam Penerimaan</span>
+        <input type="time" name="received_time" value="{{ data.received_time }}">
+      </label>
+      <label>
+        <span>Nomor Surat Masuk</span>
+        <input type="text" name="incoming_letter_number" value="{{ data.incoming_letter_number }}" placeholder="Contoh: B.600.1.17.2/5239/VII/2026" required>
+      </label>
+      <label>
+        <span>Tanggal Surat Masuk</span>
+        <input type="date" name="incoming_letter_date" value="{{ data.incoming_letter_date }}" required>
+      </label>
+      <label class="full">
+        <span>Asal Surat</span>
+        <input type="text" name="sender_name" value="{{ data.sender_name }}" placeholder="Contoh: Dinas PUPR Kabupaten Buleleng" required>
+      </label>
+      <label class="full">
+        <span>Perihal</span>
+        <textarea name="subject" rows="4" required>{{ data.subject }}</textarea>
+      </label>
+      <label>
+        <span>Tanggal Disposisi</span>
+        <input type="date" name="disposition_date" value="{{ data.disposition_date }}">
+      </label>
+      <label>
+        <span>Keterangan</span>
+        <input type="text" name="remarks" value="{{ data.remarks }}" placeholder="Arsip">
+      </label>
+      <label class="full">
+        <span>Isi Disposisi</span>
+        <textarea name="disposition_content" rows="3" placeholder="Contoh: HADIRI">{{ data.disposition_content }}</textarea>
+      </label>
+      <label class="full">
+        <span>Tindak Lanjut</span>
+        <textarea name="follow_up" rows="4" placeholder="- Koordinasikan&#10;- Hadiri dan laporkan&#10;- Arsipkan">{{ data.follow_up }}</textarea>
+      </label>
+    </div>
+  </section>
+  <div class="editor-actions register-form-actions">
+    <button type="submit" class="primary-button">{{ 'Simpan Perubahan' if entry else 'Simpan' }}</button>
+    <a class="outline-action" href="{{ url_for('register_intelijen_rin1') }}">Batal</a>
+  </div>
+</form>
+{% endblock %}
